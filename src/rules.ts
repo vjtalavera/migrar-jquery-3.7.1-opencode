@@ -3,6 +3,7 @@ export type RuleSourceType = 'api-deprecated' | 'api-removed' | 'upgrade-guide' 
 export type RuleFixType = 'auto' | 'contextual' | 'manual';
 export type SyntaxMode = 'statement' | 'expression' | 'fragment' | 'html' | 'comment' | 'unknown';
 export type Confidence = 'high' | 'medium' | 'low';
+export type TargetJQueryVersion = '3.0.0' | '3.7.1';
 
 export interface MigrationSuggestion {
   replacementText?: string;
@@ -953,3 +954,50 @@ export const migrationRules: MigrationRule[] = [
     requiresContext: true,
   }),
 ];
+
+interface ParsedVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+function parseVersion(version: string): ParsedVersion | null {
+  const match = version.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    major: Number.parseInt(match[1], 10),
+    minor: Number.parseInt(match[2], 10),
+    patch: Number.parseInt(match[3] ?? '0', 10),
+  };
+}
+
+function compareVersions(left: ParsedVersion, right: ParsedVersion): number {
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+
+  return left.patch - right.patch;
+}
+
+export function getMigrationRulesForTarget(targetVersion: TargetJQueryVersion): MigrationRule[] {
+  const parsedTarget = parseVersion(targetVersion);
+  if (!parsedTarget) {
+    return migrationRules;
+  }
+
+  return migrationRules.filter((rule) => {
+    const parsedRuleVersion = parseVersion(rule.sinceVersion);
+    if (!parsedRuleVersion) {
+      return true;
+    }
+
+    return compareVersions(parsedRuleVersion, parsedTarget) <= 0;
+  });
+}

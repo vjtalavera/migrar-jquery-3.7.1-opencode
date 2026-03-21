@@ -1,5 +1,12 @@
 import * as acorn from 'acorn';
-import { migrationRules, MigrationRule, RuleFixType, RuleSeverity, SyntaxMode } from './rules';
+import {
+  getMigrationRulesForTarget,
+  MigrationRule,
+  RuleFixType,
+  RuleSeverity,
+  SyntaxMode,
+  TargetJQueryVersion,
+} from './rules';
 
 export interface ValidationResult {
   status: 'valid' | 'invalid' | 'not_applicable' | 'needs_context';
@@ -489,9 +496,10 @@ function summarizeIssues(issues: MigrationIssue[]): MigrationSummary {
   return summary;
 }
 
-export function analyzeCode(code: string): MigrationResult {
+export function analyzeCode(code: string, targetVersion: TargetJQueryVersion = '3.7.1'): MigrationResult {
   const lines = code.split('\n');
   const issues: MigrationIssue[] = [];
+  const activeRules = getMigrationRulesForTarget(targetVersion);
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -505,7 +513,7 @@ export function analyzeCode(code: string): MigrationResult {
     for (const segment of jquerySegments) {
       const normalization = normalizeJQuerySegment(segment.text);
 
-      for (const rule of migrationRules) {
+      for (const rule of activeRules) {
         const pattern = new RegExp(rule.pattern.source, rule.pattern.flags);
         let match: RegExpExecArray | null;
 
@@ -557,7 +565,7 @@ export function analyzeCode(code: string): MigrationResult {
   };
 }
 
-export async function analyzeFiles(files: FileList): Promise<FolderAnalysisResult> {
+export async function analyzeFiles(files: FileList, targetVersion: TargetJQueryVersion = '3.7.1'): Promise<FolderAnalysisResult> {
   const fileResults: FileAnalysisResult[] = [];
   let totalFilesScanned = 0;
 
@@ -569,7 +577,7 @@ export async function analyzeFiles(files: FileList): Promise<FolderAnalysisResul
 
     totalFilesScanned += 1;
     const content = await file.text();
-    const result = analyzeCode(content);
+    const result = analyzeCode(content, targetVersion);
 
     fileResults.push({
       filePath: file.webkitRelativePath || file.name,
