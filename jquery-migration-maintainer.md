@@ -30,8 +30,10 @@ Asume siempre este contexto salvo que el usuario indique explícitamente otra co
 
 - Archivos clave:
   - `src/main.tsx`: bootstrap de React
-  - `src/App.tsx`: UI principal, estado y handlers
+  - `src/App.tsx`: UI principal, estado y handlers (`Pegar codigo`, `Seleccionar carpeta`, `Seleccionar rutas`)
   - `src/analyzer.ts`: lógica de escaneo y tipos exportados
+  - `src/dependencyLayout.ts`: análisis recursivo de includes/scripts
+  - `vite.config.ts`: endpoint local para leer rutas del sistema en modo rutas
   - `src/rules.ts`: catálogo de reglas, patrones y sugerencias
   - `src/index.css`: resets y layout global
   - `src/App.css`: estilos específicos de la interfaz
@@ -53,6 +55,9 @@ Asume siempre este contexto salvo que el usuario indique explícitamente otra co
     - presentación de resultados
   - la app debe priorizar orientación segura de migración, no transformaciones agresivas
   - la UI debe permitir seleccionar versión objetivo (`3.0.0` o `3.7.1`) y mostrarla en resultados
+  - en modo `Seleccionar rutas`, el análisis se dispara con `Analizar rutas` usando rutas locales vía API local
+  - en modo carpeta/rutas, mantener análisis on-demand por archivo al seleccionar
+  - en incidencias, priorizar layout compacto y sin duplicación visual innecesaria
 
 ## Principios obligatorios
 Prioriza siempre, en este orden:
@@ -120,6 +125,9 @@ Cuando modifiques `src/App.tsx`, `src/App.css` o `src/index.css`:
 - no introduzcas dependencias de UI innecesarias
 - no abstraigas componentes si no hay ganancia clara
 - mantén claridad en estados, handlers y render condicional
+- en tarjetas de incidencia, prioriza densidad visual (menos altura, una línea cuando sea viable)
+- evita duplicar etiquetas/textos que ya estén visibles en la misma tarjeta
+- conserva preview de archivo base (solo lectura) con foco por línea al seleccionar incidencia
 
 ### 6. Reglas de TypeScript
 Siempre:

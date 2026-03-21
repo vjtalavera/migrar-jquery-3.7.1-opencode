@@ -69,9 +69,22 @@ function getValidationLabel(issue: MigrationIssue): string {
   }
 }
 
-function IssueCard({ issue }: { issue: MigrationIssue }) {
+function IssueCard({
+  issue,
+  onSelect,
+  isSelected = false,
+}: {
+  issue: MigrationIssue;
+  onSelect?: () => void;
+  isSelected?: boolean;
+}) {
+  const isClickable = Boolean(onSelect);
+
   return (
-    <article className={`result-item ${getSeverityClass(issue.rule.severity)}`}>
+    <article
+      className={`result-item ${getSeverityClass(issue.rule.severity)} ${isClickable ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`}
+      onClick={onSelect}
+    >
       <div className="issue-top-row">
         <span className="line-number">Linea {issue.lineNumber}</span>
         <p className="issue-description">{issue.rule.description}</p>
@@ -121,6 +134,8 @@ interface FolderFileEntry {
   result: MigrationResult | null;
   recursiveAnalysis: RecursiveFileAnalysis | null;
   selectedRecursiveEntryId: string | null;
+  selectedIssueLine: number | null;
+  fileContent: string;
   error?: string;
 }
 
@@ -168,6 +183,28 @@ function filterEntriesByRoutes(entries: FolderFileEntry[], routePaths: string[])
   }
 
   return entries.filter((entry) => routePaths.some((routePath) => matchesRoutePath(entry.filePath, routePath)));
+}
+
+interface PreviewLine {
+  lineNumber: number;
+  text: string;
+}
+
+function getFilePreviewLines(content: string): PreviewLine[] {
+  const lines = content.split('\n');
+  const previewLines: PreviewLine[] = [];
+  for (let lineNumber = 1; lineNumber <= lines.length; lineNumber += 1) {
+    previewLines.push({
+      lineNumber,
+      text: lines[lineNumber - 1],
+    });
+  }
+
+  return previewLines;
+}
+
+function buildPreviewLineId(entryId: string, lineNumber: number): string {
+  return `preview-${encodeURIComponent(entryId)}-${lineNumber}`;
 }
 
 function getFileNameFromPath(filePath: string): string {
@@ -289,6 +326,8 @@ function App() {
         result: null,
         recursiveAnalysis: null,
         selectedRecursiveEntryId: null,
+        selectedIssueLine: null,
+        fileContent: item.content,
       }));
 
       const filteredEntries = filterEntriesByRoutes(entries, routePaths);
@@ -312,6 +351,8 @@ function App() {
       result: null,
       recursiveAnalysis: null,
       selectedRecursiveEntryId: null,
+      selectedIssueLine: null,
+      fileContent: '',
       error: undefined,
     })));
   };
@@ -336,6 +377,8 @@ function App() {
         result: null,
         recursiveAnalysis: null,
         selectedRecursiveEntryId: null,
+        selectedIssueLine: null,
+        fileContent: '',
       }));
 
     setFolderFiles(entries);
@@ -361,10 +404,13 @@ function App() {
     )));
 
     try {
+      const sourceFile = sourceEntries.find((entry) => entry.id === entryId)?.file;
+      const fileContent = sourceFile ? await sourceFile.text() : '';
       const recursiveAnalysis = await analyzeFileRecursively(filePath, fileRecords, targetVersion);
       const rootEntry = recursiveAnalysis.entries.find((entry) => entry.kind === 'root');
       const rootResult = rootEntry?.result ?? null;
       const defaultSelectedRecursiveEntryId = getDefaultRecursiveEntryId(recursiveAnalysis);
+      const selectedIssueLine = rootResult?.issues[0]?.lineNumber ?? null;
 
       setFolderFiles((current) => current.map((entry) => (
         entry.id === entryId
@@ -376,6 +422,8 @@ function App() {
               result: rootResult,
               recursiveAnalysis,
               selectedRecursiveEntryId: defaultSelectedRecursiveEntryId,
+              selectedIssueLine,
+              fileContent,
               error: undefined,
             }
           : entry
@@ -393,6 +441,8 @@ function App() {
               result: null,
               recursiveAnalysis: null,
               selectedRecursiveEntryId: null,
+              selectedIssueLine: null,
+              fileContent: '',
               error: message,
             }
           : entry
@@ -427,6 +477,19 @@ function App() {
           }
         : entry
     )));
+  };
+
+  const handleSelectIssueLine = (folderEntryId: string, lineNumber: number) => {
+    setFolderFiles((current) => current.map((entry) => (
+      entry.id === folderEntryId
+        ? { ...entry, selectedIssueLine: lineNumber }
+        : entry
+    )));
+
+    requestAnimationFrame(() => {
+      const targetElement = document.getElementById(buildPreviewLineId(folderEntryId, lineNumber));
+      targetElement?.scrollIntoView({ block: 'center' });
+    });
   };
 
   return (
@@ -608,8 +671,28 @@ function App() {
                             <div className="no-issues">No se detectaron hallazgos en el archivo base.</div>
                           ) : (
                             fileEntry.result.issues.map((issue, index) => (
-                              <IssueCard key={`${fileEntry.id}-root-${issue.rule.id}-${index}`} issue={issue} />
+                              <IssueCard
+                                key={`${fileEntry.id}-root-${issue.rule.id}-${index}`}
+                                issue={issue}
+                                onSelect={() => handleSelectIssueLine(fileEntry.id, issue.lineNumber)}
+                                isSelected={fileEntry.selectedIssueLine === issue.lineNumber}
+                              />
                             ))
+                          )}
+
+                          {fileEntry.fileContent && fileEntry.selectedIssueLine && (
+                            <div className="file-preview">
+                              {getFilePreviewLines(fileEntry.fileContent).map((line) => (
+                                <div
+                                  key={`${fileEntry.id}-preview-${line.lineNumber}`}
+                                  id={buildPreviewLineId(fileEntry.id, line.lineNumber)}
+                                  className={`preview-line ${line.lineNumber === fileEntry.selectedIssueLine ? 'focus' : ''}`}
+                                >
+                                  <span className="preview-line-number">{line.lineNumber}</span>
+                                  <span className="preview-line-text">{line.text || ' '}</span>
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </section>
                       ) : (
