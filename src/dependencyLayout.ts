@@ -96,6 +96,12 @@ interface ReferenceMatch {
   line: number;
 }
 
+interface OrderedReference {
+  value: string;
+  line: number;
+  kind: 'jsp-include' | 'script-src';
+}
+
 function extractReferencesByPattern(content: string, blockPattern: RegExp): ReferenceMatch[] {
   const references: ReferenceMatch[] = [];
   let blockMatch: RegExpExecArray | null;
@@ -129,6 +135,25 @@ function extractJspIncludeReferences(content: string): ReferenceMatch[] {
 
 function extractScriptSourceReferences(content: string): ReferenceMatch[] {
   return extractReferencesByPattern(content, /<script\b[^>]*\bsrc\s*=\s*['"][^'"]+['"][^>]*>/gi);
+}
+
+function getOrderedFileReferences(content: string): OrderedReference[] {
+  const jspRefs = extractJspIncludeReferences(content).map((ref) => ({
+    ...ref,
+    kind: 'jsp-include' as const,
+  }));
+  const scriptRefs = extractScriptSourceReferences(content).map((ref) => ({
+    ...ref,
+    kind: 'script-src' as const,
+  }));
+
+  return [...jspRefs, ...scriptRefs].sort((left, right) => {
+    if (left.line !== right.line) {
+      return left.line - right.line;
+    }
+
+    return left.value.localeCompare(right.value);
+  });
 }
 
 interface InlineScriptBlock {
@@ -299,14 +324,14 @@ export async function analyzeFileRecursively(
       });
     }
 
-    const jspRefs = extractJspIncludeReferences(content);
-    for (const ref of jspRefs) {
+    const orderedReferences = getOrderedFileReferences(content);
+    for (const ref of orderedReferences) {
       const resolved = resolveReferencePath(filePath, ref.value, pathMap);
       if (!resolved) {
         pushEntry({
           filePath: ref.value,
           displayPath: `${filePath} -> ${ref.value}`,
-          kind: 'jsp-include',
+          kind: ref.kind,
           depth: depth + 1,
           found: false,
           referenceLine: ref.line,
@@ -316,27 +341,7 @@ export async function analyzeFileRecursively(
         continue;
       }
 
-      await visitFile(resolved, 'jsp-include', depth + 1, filePath, ref.line);
-    }
-
-    const scriptRefs = extractScriptSourceReferences(content);
-    for (const ref of scriptRefs) {
-      const resolved = resolveReferencePath(filePath, ref.value, pathMap);
-      if (!resolved) {
-        pushEntry({
-          filePath: ref.value,
-          displayPath: `${filePath} -> ${ref.value}`,
-          kind: 'script-src',
-          depth: depth + 1,
-          found: false,
-          referenceLine: ref.line,
-          parentPath: filePath,
-          result: null,
-        });
-        continue;
-      }
-
-      await visitFile(resolved, 'script-src', depth + 1, filePath, ref.line);
+      await visitFile(resolved, ref.kind, depth + 1, filePath, ref.line);
     }
   };
 
