@@ -459,11 +459,6 @@ button.secondary:hover {
   gap: 0.4rem;
   align-items: baseline;
   padding: 0.14rem 0.42rem;
-  border-bottom: 1px solid rgba(61, 75, 112, 0.22);
-}
-
-.preview-line:last-child {
-  border-bottom: none;
 }
 
 .preview-line.focus {
