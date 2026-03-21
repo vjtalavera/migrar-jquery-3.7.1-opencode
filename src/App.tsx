@@ -451,10 +451,10 @@ function App() {
                   </span>
                   {fileEntry.isAnalyzed && (
                     <>
-                      <span>{fileEntry.recursiveAnalysis?.totalIssues ?? 0} incidencias</span>
-                      <span className="error-text">{fileEntry.recursiveAnalysis?.summary.errors ?? 0} errores</span>
-                      <span className="warning-text">{fileEntry.recursiveAnalysis?.summary.warnings ?? 0} warnings</span>
-                      <span className="info-text">{fileEntry.recursiveAnalysis?.summary.info ?? 0} info</span>
+                      <span>{fileEntry.result?.issues.length ?? 0} incidencias</span>
+                      <span className="error-text">{fileEntry.result?.summary.errors ?? 0} errores</span>
+                      <span className="warning-text">{fileEntry.result?.summary.warnings ?? 0} warnings</span>
+                      <span className="info-text">{fileEntry.result?.summary.info ?? 0} info</span>
                     </>
                   )}
                 </span>
