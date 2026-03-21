@@ -300,11 +300,7 @@ function App() {
       const filteredEntries = filterEntriesByRoutes(entries, routePaths);
       setFolderFiles(filteredEntries);
       setSkippedFilesCount(0);
-      setRouteHint(`${filteredEntries.length} archivo(s) seleccionado(s) por rutas.`);
-
-      for (const entry of filteredEntries) {
-        await handleAnalyzeFile(entry.id, entry.filePath, filteredEntries);
-      }
+      setRouteHint(`${filteredEntries.length} archivo(s) cargado(s) por rutas. Selecciona un archivo para analizar.`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'No se pudieron analizar las rutas locales.';
       setRouteHint(message);
