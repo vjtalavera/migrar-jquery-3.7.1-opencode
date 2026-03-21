@@ -8,7 +8,6 @@ import {
 import { TargetJQueryVersion } from './rules';
 import {
   analyzeFileRecursively,
-  IncludeKind,
   RecursiveFileAnalysis,
 } from './dependencyLayout';
 import './App.css';
@@ -131,40 +130,17 @@ interface FolderFileEntry {
   error?: string;
 }
 
-function getIncludeKindLabel(kind: IncludeKind): string {
-  if (kind === 'root') {
-    return 'archivo base';
-  }
-
-  if (kind === 'jsp-include') {
-    return 'jsp include';
-  }
-
-  if (kind === 'script-src') {
-    return 'script src';
-  }
-
-  return 'script inline';
-}
-
-function sortByReferenceLine(left: { referenceLine?: number; displayPath: string }, right: { referenceLine?: number; displayPath: string }): number {
-  const leftLine = left.referenceLine ?? Number.MAX_SAFE_INTEGER;
-  const rightLine = right.referenceLine ?? Number.MAX_SAFE_INTEGER;
-
-  if (leftLine !== rightLine) {
-    return leftLine - rightLine;
-  }
-
-  return left.displayPath.localeCompare(right.displayPath);
-}
-
 function getDefaultRecursiveEntryId(analysis: RecursiveFileAnalysis): string | null {
-  const firstRecursiveWithResult = analysis.entries.find((entry) => entry.kind !== 'root' && entry.result);
+  const firstRecursiveWithResult = analysis.entries.find(
+    (entry) => (entry.kind === 'jsp-include' || entry.kind === 'script-src') && entry.result,
+  );
   if (firstRecursiveWithResult) {
     return firstRecursiveWithResult.id;
   }
 
-  const firstRecursive = analysis.entries.find((entry) => entry.kind !== 'root');
+  const firstRecursive = analysis.entries.find(
+    (entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src',
+  );
   return firstRecursive?.id ?? null;
 }
 
@@ -524,11 +500,10 @@ function App() {
                     <div className="recursive-right">
                       {(() => {
                         const recursiveEntries = fileEntry.recursiveAnalysis.entries
-                          .filter((entry) => entry.kind !== 'root')
-                          .sort(sortByReferenceLine);
+                          .filter((entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src');
 
                         if (recursiveEntries.length === 0) {
-                          return <div className="no-issues">No se detectaron includes ni scripts recursivos.</div>;
+                          return <div className="no-issues">No se detectaron archivos recursivos.</div>;
                         }
 
                         return (
@@ -546,9 +521,8 @@ function App() {
                                       style={{ paddingLeft: `${entry.depth * 1.1}rem` }}
                                       onClick={() => handleSelectRecursiveEntry(fileEntry.id, entry.id)}
                                     >
-                                      <span className="dependency-kind">{getIncludeKindLabel(entry.kind)}</span>
                                       <span className="dependency-path">{entry.displayPath}</span>
-                                      {entry.referenceLine && <span className="dependency-count">ref linea {entry.referenceLine}</span>}
+                                      {entry.referenceLine && <span className="dependency-count">linea {entry.referenceLine}</span>}
                                       {entry.result && <span className="dependency-count">{entry.result.issues.length} incidencias</span>}
                                       {!entry.found && <span className="dependency-count">no encontrado</span>}
                                     </button>
@@ -566,9 +540,8 @@ function App() {
                                         {entry.result && entry.result.issues.length > 0 && (
                                           <>
                                             <div className="included-header">
-                                              <span className="file-path">{entry.displayPath}</span>
                                               <span className="file-stats">
-                                                {entry.referenceLine && <span>ref linea {entry.referenceLine}</span>}
+                                                {entry.referenceLine && <span>linea {entry.referenceLine}</span>}
                                                 <span>{entry.result.issues.length} incidencias</span>
                                                 <span className="error-text">{entry.result.summary.errors} errores</span>
                                                 <span className="warning-text">{entry.result.summary.warnings} warnings</span>
