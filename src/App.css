@@ -78,6 +78,12 @@
   align-items: flex-start;
 }
 
+.local-paths-input {
+  width: 100%;
+  min-height: 6.5rem;
+  height: 6.5rem;
+}
+
 .folder-hint {
   color: #8e97b4;
   font-size: 0.85rem;
