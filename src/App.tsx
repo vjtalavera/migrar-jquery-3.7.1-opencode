@@ -611,7 +611,6 @@ function App() {
                       {fileEntry.result ? (
                         <section className="included-result">
                           <div className="included-header">
-                            <span className="file-path">{fileEntry.filePath}</span>
                             <span className="file-stats">
                               <span>{fileEntry.result.issues.length} incidencias</span>
                               <span className="error-text">{fileEntry.result.summary.errors} errores</span>
