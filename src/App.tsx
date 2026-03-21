@@ -130,6 +130,58 @@ interface FolderFileEntry {
   error?: string;
 }
 
+interface RouteApiFile {
+  filePath: string;
+  content: string;
+}
+
+function normalizeLocalPath(path: string): string {
+  return path
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\.\//, '')
+    .toLowerCase();
+}
+
+function parseRouteLines(value: string): string[] {
+  const unique = new Set<string>();
+
+  for (const line of value.split('\n')) {
+    const normalized = normalizeLocalPath(line);
+    if (normalized) {
+      unique.add(normalized);
+    }
+  }
+
+  return Array.from(unique);
+}
+
+function matchesRoutePath(filePath: string, routePath: string): boolean {
+  const normalizedFilePath = normalizeLocalPath(filePath);
+
+  return normalizedFilePath === routePath
+    || normalizedFilePath.endsWith(`/${routePath}`)
+    || normalizedFilePath.startsWith(`${routePath}/`)
+    || normalizedFilePath.includes(`/${routePath}/`)
+    || routePath.endsWith(`/${normalizedFilePath}`);
+}
+
+function filterEntriesByRoutes(entries: FolderFileEntry[], routePaths: string[]): FolderFileEntry[] {
+  if (routePaths.length === 0) {
+    return entries;
+  }
+
+  return entries.filter((entry) => routePaths.some((routePath) => matchesRoutePath(entry.filePath, routePath)));
+}
+
+function getFileNameFromPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || 'archivo';
+}
+
 function getDefaultRecursiveEntryId(analysis: RecursiveFileAnalysis): string | null {
   const firstRecursiveWithResult = analysis.entries.find(
     (entry) => (entry.kind === 'jsp-include' || entry.kind === 'script-src') && entry.result,
@@ -145,12 +197,14 @@ function getDefaultRecursiveEntryId(analysis: RecursiveFileAnalysis): string | n
 }
 
 function App() {
-  const [mode, setMode] = useState<'code' | 'folder'>('code');
+  const [mode, setMode] = useState<'code' | 'folder' | 'routes'>('code');
   const [targetVersion, setTargetVersion] = useState<TargetJQueryVersion>('3.7.1');
   const [code, setCode] = useState('');
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [folderFiles, setFolderFiles] = useState<FolderFileEntry[]>([]);
   const [skippedFilesCount, setSkippedFilesCount] = useState(0);
+  const [routeInput, setRouteInput] = useState('');
+  const [routeHint, setRouteHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const analyzedFiles = folderFiles.filter((file) => file.isAnalyzed);
@@ -191,11 +245,66 @@ function App() {
     setResult(null);
     setFolderFiles([]);
     setSkippedFilesCount(0);
+    setRouteInput('');
+    setRouteHint(null);
     setMode('code');
   };
 
   const handleSelectFolder = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleAnalyzeRoutes = async (): Promise<void> => {
+    const routePaths = parseRouteLines(routeInput);
+    if (routePaths.length === 0) {
+      setRouteHint('Ingresa al menos una ruta por linea.');
+      return;
+    }
+
+    setRouteHint('Analizando rutas...');
+
+    try {
+      const apiUrl = new URL('api/local-routes/files', window.location.href).toString();
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          routes: routePaths,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status} al leer rutas locales.`);
+      }
+
+      const payload = await response.json() as { files?: RouteApiFile[]; error?: string };
+      if (payload.error) {
+        throw new Error(payload.error);
+      }
+
+      const files = payload.files ?? [];
+      const entries: FolderFileEntry[] = files.map((item, index) => ({
+        id: `${item.filePath}-${index}`,
+        file: new File([item.content], getFileNameFromPath(item.filePath), { type: 'text/plain' }),
+        filePath: item.filePath,
+        isAnalyzing: false,
+        isAnalyzed: false,
+        isExpanded: false,
+        result: null,
+        recursiveAnalysis: null,
+        selectedRecursiveEntryId: null,
+      }));
+
+      const filteredEntries = filterEntriesByRoutes(entries, routePaths);
+      setFolderFiles(filteredEntries);
+      setSkippedFilesCount(0);
+      setRouteHint(`${filteredEntries.length} archivo(s) cargado(s) por rutas. Selecciona un archivo para analizar.`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'No se pudieron analizar las rutas locales.';
+      setRouteHint(message);
+    }
   };
 
   const handleTargetVersionChange = (version: TargetJQueryVersion) => {
@@ -223,8 +332,7 @@ function App() {
     const selectedFiles = Array.from(files);
     const allowedFiles = selectedFiles.filter((file) => isAllowedFile(file.name));
 
-    setFolderFiles(
-      allowedFiles.map((file, index) => ({
+    const entries = allowedFiles.map((file, index) => ({
         id: `${file.webkitRelativePath || file.name}-${index}`,
         file,
         filePath: file.webkitRelativePath || file.name,
@@ -234,14 +342,20 @@ function App() {
         result: null,
         recursiveAnalysis: null,
         selectedRecursiveEntryId: null,
-      })),
-    );
+      }));
+
+    setFolderFiles(entries);
+
     setSkippedFilesCount(selectedFiles.length - allowedFiles.length);
     event.target.value = '';
   };
 
-  const handleAnalyzeFile = async (entryId: string, filePath: string): Promise<void> => {
-    const fileRecords = folderFiles.map((entry) => ({
+  const handleAnalyzeFile = async (
+    entryId: string,
+    filePath: string,
+    sourceEntries: FolderFileEntry[] = folderFiles,
+  ): Promise<void> => {
+    const fileRecords = sourceEntries.map((entry) => ({
       filePath: entry.filePath,
       file: entry.file,
     }));
@@ -339,6 +453,9 @@ function App() {
           <button className={`tab ${mode === 'folder' ? 'active' : ''}`} onClick={() => setMode('folder')}>
             Seleccionar carpeta
           </button>
+          <button className={`tab ${mode === 'routes' ? 'active' : ''}`} onClick={() => setMode('routes')}>
+            Seleccionar rutas
+          </button>
         </div>
 
         <div className="version-tabs">
@@ -377,7 +494,7 @@ function App() {
           </>
         )}
 
-        {mode === 'folder' && (
+        {(mode === 'folder' || mode === 'routes') && (
           <div className="folder-section">
             <input
               ref={fileInputRef}
@@ -389,9 +506,28 @@ function App() {
               style={{ display: 'none' }}
             />
             <div className="folder-select">
-              <button onClick={handleSelectFolder}>
-                Seleccionar carpeta
-              </button>
+              {mode === 'folder' && (
+                <button onClick={handleSelectFolder}>
+                  Seleccionar carpeta
+                </button>
+              )}
+
+              {mode === 'routes' && (
+                <>
+                  <span className="folder-hint">Ingresa rutas manuales (una por linea) y pulsa "Analizar rutas".</span>
+                  <textarea
+                    className="local-paths-input"
+                    value={routeInput}
+                    onChange={(event) => setRouteInput(event.target.value)}
+                    placeholder={'Una ruta por linea\nEjemplo:\nC:/proyecto-a/webapp/WEB-INF/jsp/home.jsp\nC:/proyecto-b/webapp/js/legacy.js'}
+                  />
+                  <button type="button" className="secondary" onClick={() => void handleAnalyzeRoutes()}>
+                    Analizar rutas
+                  </button>
+                  {routeHint && <span className="folder-hint">{routeHint}</span>}
+                </>
+              )}
+
               <span className="folder-hint">Se analizan recursivamente `jsp`, `js`, `html` y `htm`.</span>
               {skippedFilesCount > 0 && (
                 <span className="folder-hint">{skippedFilesCount} archivo(s) ignorado(s) por extension no compatible.</span>
@@ -422,7 +558,7 @@ function App() {
         </section>
       )}
 
-      {mode === 'folder' && folderFiles.length > 0 && (
+      {(mode === 'folder' || mode === 'routes') && folderFiles.length > 0 && (
         <section className="results">
           <div className="folder-stats">
             <div className="stat">Version objetivo: <strong>{targetVersion}</strong></div>
@@ -475,7 +611,6 @@ function App() {
                       {fileEntry.result ? (
                         <section className="included-result">
                           <div className="included-header">
-                            <span className="file-path">{fileEntry.filePath}</span>
                             <span className="file-stats">
                               <span>{fileEntry.result.issues.length} incidencias</span>
                               <span className="error-text">{fileEntry.result.summary.errors} errores</span>
