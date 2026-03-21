@@ -73,39 +73,45 @@ function IssueCard({
   issue,
   onSelect,
   isSelected = false,
+  showExplanatoryText = true,
 }: {
   issue: MigrationIssue;
   onSelect?: () => void;
   isSelected?: boolean;
+  showExplanatoryText?: boolean;
 }) {
   const isClickable = Boolean(onSelect);
 
   return (
     <article
-      className={`result-item ${getSeverityClass(issue.rule.severity)} ${isClickable ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`}
+      className={`result-item ${getSeverityClass(issue.rule.severity)} ${isClickable ? 'selectable' : ''} ${isSelected ? 'selected' : ''} ${showExplanatoryText ? '' : 'no-explanatory'}`}
       onClick={onSelect}
     >
-      <div className="issue-top-row">
-        <span className="line-number">Linea {issue.lineNumber}</span>
-        <p className="issue-description">{issue.rule.description}</p>
-        <div className="issue-meta-row">
-          <span className="meta-pill">jQuery {issue.rule.sinceVersion}</span>
-          <span className="meta-pill">{issue.rule.sourceType}</span>
-          <span className="meta-pill">{getFixTypeLabel(issue.fixType)}</span>
-          <span className={`meta-pill validation ${issue.validation.status}`}>{getValidationLabel(issue)}</span>
+      {showExplanatoryText && (
+        <div className="issue-top-row">
+          <span className="line-number">Linea {issue.lineNumber}</span>
+          <p className="issue-description">{issue.rule.description}</p>
+          <div className="issue-meta-row">
+            <span className="meta-pill">jQuery {issue.rule.sinceVersion}</span>
+            <span className="meta-pill">{issue.rule.sourceType}</span>
+            <span className="meta-pill">{getFixTypeLabel(issue.fixType)}</span>
+            <span className={`meta-pill validation ${issue.validation.status}`}>{getValidationLabel(issue)}</span>
+          </div>
+          <span className={`issue-type ${getSeverityClass(issue.rule.severity)}`}>
+            {issue.rule.severity.toUpperCase()}: {issue.rule.name}
+          </span>
         </div>
-        <span className={`issue-type ${getSeverityClass(issue.rule.severity)}`}>
-          {issue.rule.severity.toUpperCase()}: {issue.rule.name}
-        </span>
-      </div>
+      )}
 
       <div className="code-block">
         <div className="original-code">
+          {!showExplanatoryText && <span className="inline-line-number">L{issue.lineNumber}</span>}
           {issue.line}
         </div>
 
         {issue.suggestedLine ? (
           <div className={`migrated-code ${issue.validation.status === 'invalid' ? 'syntax-error' : ''}`}>
+            {!showExplanatoryText && <span className="inline-line-number">L{issue.lineNumber}</span>}
             {issue.suggestedLine}
           </div>
         ) : (
@@ -115,11 +121,13 @@ function IssueCard({
         )}
       </div>
 
-      {issue.note && issue.suggestedLine && <p className="extra-note">{issue.note}</p>}
-      <div className="issue-footer">
-        {issue.validation.message && <span className="validation-detail">{issue.validation.message}</span>}
-        <span className="source-link">Fuente oficial: <a href={issue.rule.sourceUrl} target="_blank" rel="noreferrer">{issue.rule.sourceUrl}</a></span>
-      </div>
+      {showExplanatoryText && issue.note && issue.suggestedLine && <p className="extra-note">{issue.note}</p>}
+      {showExplanatoryText && (
+        <div className="issue-footer">
+          {issue.validation.message && <span className="validation-detail">{issue.validation.message}</span>}
+          <span className="source-link">Fuente oficial: <a href={issue.rule.sourceUrl} target="_blank" rel="noreferrer">{issue.rule.sourceUrl}</a></span>
+        </div>
+      )}
     </article>
   );
 }
@@ -232,6 +240,7 @@ function App() {
   const [targetVersion, setTargetVersion] = useState<TargetJQueryVersion>('3.7.1');
   const [code, setCode] = useState('');
   const [result, setResult] = useState<MigrationResult | null>(null);
+  const [showExplanatoryText, setShowExplanatoryText] = useState(true);
   const [folderFiles, setFolderFiles] = useState<FolderFileEntry[]>([]);
   const [skippedFilesCount, setSkippedFilesCount] = useState(0);
   const [routeInput, setRouteInput] = useState('');
@@ -529,6 +538,14 @@ function App() {
           >
             jQuery 3.7.1
           </button>
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={showExplanatoryText}
+              onChange={(event) => setShowExplanatoryText(event.target.checked)}
+            />
+            Texto explicativo
+          </label>
         </div>
 
         {mode === 'code' && (
@@ -610,7 +627,13 @@ function App() {
           {result.issues.length === 0 ? (
             <div className="no-issues">No se detectaron hallazgos con las reglas actuales.</div>
           ) : (
-            result.issues.map((issue, index) => <IssueCard key={`${issue.rule.id}-${index}`} issue={issue} />)
+            result.issues.map((issue, index) => (
+              <IssueCard
+                key={`${issue.rule.id}-${index}`}
+                issue={issue}
+                showExplanatoryText={showExplanatoryText}
+              />
+            ))
           )}
         </section>
       )}
@@ -676,6 +699,7 @@ function App() {
                                 issue={issue}
                                 onSelect={() => handleSelectIssueLine(fileEntry.id, issue.lineNumber)}
                                 isSelected={fileEntry.selectedIssueLine === issue.lineNumber}
+                                showExplanatoryText={showExplanatoryText}
                               />
                             ))
                           )}
@@ -752,7 +776,11 @@ function App() {
                                               </span>
                                             </div>
                                             {entry.result.issues.map((issue, index) => (
-                                              <IssueCard key={`${entry.id}-${issue.rule.id}-${index}`} issue={issue} />
+                                              <IssueCard
+                                                key={`${entry.id}-${issue.rule.id}-${index}`}
+                                                issue={issue}
+                                                showExplanatoryText={showExplanatoryText}
+                                              />
                                             ))}
                                           </>
                                         )}
