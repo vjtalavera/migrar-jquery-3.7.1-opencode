@@ -72,47 +72,41 @@ function getValidationLabel(issue: MigrationIssue): string {
 function IssueCard({ issue }: { issue: MigrationIssue }) {
   return (
     <article className={`result-item ${getSeverityClass(issue.rule.severity)}`}>
-      <div className="result-header">
+      <div className="issue-top-row">
         <span className="line-number">Linea {issue.lineNumber}</span>
+        <p className="issue-description">{issue.rule.description}</p>
+        <div className="issue-meta-row">
+          <span className="meta-pill">jQuery {issue.rule.sinceVersion}</span>
+          <span className="meta-pill">{issue.rule.sourceType}</span>
+          <span className="meta-pill">{getFixTypeLabel(issue.fixType)}</span>
+          <span className={`meta-pill validation ${issue.validation.status}`}>{getValidationLabel(issue)}</span>
+        </div>
         <span className={`issue-type ${getSeverityClass(issue.rule.severity)}`}>
           {issue.rule.severity.toUpperCase()}: {issue.rule.name}
         </span>
       </div>
 
-      <p className="issue-description">{issue.rule.description}</p>
-
-      <div className="issue-meta-row">
-        <span className="meta-pill">jQuery {issue.rule.sinceVersion}</span>
-        <span className="meta-pill">{issue.rule.sourceType}</span>
-        <span className="meta-pill">{getFixTypeLabel(issue.fixType)}</span>
-        <span className={`meta-pill validation ${issue.validation.status}`}>{getValidationLabel(issue)}</span>
-      </div>
-
       <div className="code-block">
         <div className="original-code">
-          <strong>Original:</strong>
-          <br />
           {issue.line}
         </div>
 
         {issue.suggestedLine ? (
           <div className={`migrated-code ${issue.validation.status === 'invalid' ? 'syntax-error' : ''}`}>
-            <strong>{issue.fixType === 'manual' ? 'Sugerencia:' : 'Linea propuesta:'}</strong>
-            <br />
             {issue.suggestedLine}
           </div>
         ) : (
           <div className="migrated-code syntax-note">
-            <strong>Sin linea propuesta:</strong>
-            <br />
-            {issue.note ?? 'No hay correccion automatica segura para este caso.'}
+            <strong>Sin linea propuesta:</strong> {issue.note ?? 'No hay correccion automatica segura para este caso.'}
           </div>
         )}
       </div>
 
       {issue.note && issue.suggestedLine && <p className="extra-note">{issue.note}</p>}
-      {issue.validation.message && <p className="validation-detail">{issue.validation.message}</p>}
-      <p className="source-link">Fuente oficial: <a href={issue.rule.sourceUrl} target="_blank" rel="noreferrer">{issue.rule.sourceUrl}</a></p>
+      <div className="issue-footer">
+        {issue.validation.message && <span className="validation-detail">{issue.validation.message}</span>}
+        <span className="source-link">Fuente oficial: <a href={issue.rule.sourceUrl} target="_blank" rel="noreferrer">{issue.rule.sourceUrl}</a></span>
+      </div>
     </article>
   );
 }
@@ -610,15 +604,6 @@ function App() {
                     <div className="recursive-left">
                       {fileEntry.result ? (
                         <section className="included-result">
-                          <div className="included-header">
-                            <span className="file-stats">
-                              <span>{fileEntry.result.issues.length} incidencias</span>
-                              <span className="error-text">{fileEntry.result.summary.errors} errores</span>
-                              <span className="warning-text">{fileEntry.result.summary.warnings} warnings</span>
-                              <span className="info-text">{fileEntry.result.summary.info} info</span>
-                            </span>
-                          </div>
-
                           {fileEntry.result.issues.length === 0 ? (
                             <div className="no-issues">No se detectaron hallazgos en el archivo base.</div>
                           ) : (
