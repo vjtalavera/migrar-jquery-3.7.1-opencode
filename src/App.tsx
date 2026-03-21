@@ -5,6 +5,7 @@ import {
   MigrationIssue,
   MigrationResult,
 } from './analyzer';
+import { TargetJQueryVersion } from './rules';
 import {
   analyzeFileRecursively,
   IncludeKind,
@@ -169,6 +170,7 @@ function getDefaultRecursiveEntryId(analysis: RecursiveFileAnalysis): string | n
 
 function App() {
   const [mode, setMode] = useState<'code' | 'folder'>('code');
+  const [targetVersion, setTargetVersion] = useState<TargetJQueryVersion>('3.7.1');
   const [code, setCode] = useState('');
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [folderFiles, setFolderFiles] = useState<FolderFileEntry[]>([]);
@@ -205,7 +207,7 @@ function App() {
   const handleAnalyze = () => {
     setFolderFiles([]);
     setSkippedFilesCount(0);
-    setResult(analyzeCode(code));
+    setResult(analyzeCode(code, targetVersion));
   };
 
   const handleLoadSample = () => {
@@ -218,6 +220,21 @@ function App() {
 
   const handleSelectFolder = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleTargetVersionChange = (version: TargetJQueryVersion) => {
+    setTargetVersion(version);
+    setResult(null);
+    setFolderFiles((current) => current.map((entry) => ({
+      ...entry,
+      isAnalyzing: false,
+      isAnalyzed: false,
+      isExpanded: false,
+      result: null,
+      recursiveAnalysis: null,
+      selectedRecursiveEntryId: null,
+      error: undefined,
+    })));
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -260,7 +277,7 @@ function App() {
     )));
 
     try {
-      const recursiveAnalysis = await analyzeFileRecursively(filePath, fileRecords);
+      const recursiveAnalysis = await analyzeFileRecursively(filePath, fileRecords, targetVersion);
       const rootEntry = recursiveAnalysis.entries.find((entry) => entry.kind === 'root');
       const rootResult = rootEntry?.result ?? null;
       const defaultSelectedRecursiveEntryId = getDefaultRecursiveEntryId(recursiveAnalysis);
@@ -348,6 +365,22 @@ function App() {
           </button>
         </div>
 
+        <div className="version-tabs">
+          <span className="version-label">Version objetivo</span>
+          <button
+            className={`tab ${targetVersion === '3.0.0' ? 'active' : ''}`}
+            onClick={() => handleTargetVersionChange('3.0.0')}
+          >
+            jQuery 3.0.0
+          </button>
+          <button
+            className={`tab ${targetVersion === '3.7.1' ? 'active' : ''}`}
+            onClick={() => handleTargetVersionChange('3.7.1')}
+          >
+            jQuery 3.7.1
+          </button>
+        </div>
+
         {mode === 'code' && (
           <>
             <label htmlFor="code-input">Codigo legacy a analizar</label>
@@ -395,6 +428,7 @@ function App() {
       {result && (
         <section className="results">
           <div className="stats">
+            <div className="stat">Version objetivo: <strong>{targetVersion}</strong></div>
             <div className="stat">Lineas: <strong>{result.totalLines}</strong></div>
             <div className="stat">Errores: <strong className="error-text">{result.summary.errors}</strong></div>
             <div className="stat">Warnings: <strong className="warning-text">{result.summary.warnings}</strong></div>
@@ -415,6 +449,7 @@ function App() {
       {mode === 'folder' && folderFiles.length > 0 && (
         <section className="results">
           <div className="folder-stats">
+            <div className="stat">Version objetivo: <strong>{targetVersion}</strong></div>
             <div className="stat">Archivos detectados: <strong>{folderFiles.length}</strong></div>
             <div className="stat">Pendientes: <strong>{pendingFiles}</strong></div>
             <div className="stat">Analizados: <strong>{analyzedFiles.length}</strong></div>

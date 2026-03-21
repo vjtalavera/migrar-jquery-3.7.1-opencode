@@ -37,6 +37,19 @@
   gap: 0.75rem;
 }
 
+.version-tabs {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.version-label {
+  color: #b9c2dc;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
 .tab {
   padding: 0.7rem 1rem;
   border: 1px solid #313b5e;
@@ -423,7 +436,8 @@ button.secondary:hover {
   .result-header,
   .file-header,
   .actions,
-  .mode-tabs {
+  .mode-tabs,
+  .version-tabs {
     flex-direction: column;
     align-items: stretch;
   }

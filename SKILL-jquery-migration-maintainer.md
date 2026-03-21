@@ -3,7 +3,7 @@
 ## Proposito
 Este skill define un modo operativo exhaustivo para mantener este repositorio.
 Debe usarse como guia base para cualquier prompt relacionado con la herramienta
-de migracion a jQuery 3.7.1.
+de migracion a jQuery 3.7.1 y jQuery 3.0.0.
 
 ## Relacion con AGENTS.md
 Este skill no reemplaza `AGENTS.md`; lo extiende.
@@ -20,6 +20,9 @@ Reglas de precedencia:
   - `src/analyzer.ts`: deteccion, normalizacion y resultado.
   - `src/dependencyLayout.ts`: layout recursivo de includes/scripts y analisis por nodo.
   - `src/rules.ts`: catalogo de reglas y sugerencias.
+- Versiones objetivo soportadas:
+  - `3.0.0`
+  - `3.7.1` (default)
 - Verificacion disponible:
   - `npx tsc --noEmit`
   - `npm run build`
@@ -48,6 +51,9 @@ Reglas de precedencia:
 - Priorizar cambios minimos, seguros y trazables.
 - Mantener TypeScript estricto, sin `any`.
 - Preservar el flujo de UI: entrada -> analisis -> resultados.
+- Preservar selector de version objetivo y su reflejo explicito en resultados.
+- Centralizar filtrado por version objetivo en analyzer/rules (evitar filtros duplicados en UI).
+- No ejecutar reglas cuyo `sinceVersion` sea mayor a la version objetivo seleccionada.
 - En modo carpeta, preservar analisis bajo demanda por archivo seleccionado.
 - Preservar layout de dos columnas en resultados recursivos:
   - izquierda: incidencias del archivo base,

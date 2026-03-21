@@ -1,4 +1,5 @@
 import { analyzeCode, MigrationResult, MigrationSummary } from './analyzer';
+import { TargetJQueryVersion } from './rules';
 
 export type IncludeKind = 'root' | 'jsp-include' | 'script-src' | 'inline-script';
 
@@ -216,7 +217,11 @@ function resolveReferencePath(currentPath: string, reference: string, pathMap: M
   return findByBasename(pathMap, normalizedReference);
 }
 
-export async function analyzeFileRecursively(rootPath: string, files: FileRecord[]): Promise<RecursiveFileAnalysis> {
+export async function analyzeFileRecursively(
+  rootPath: string,
+  files: FileRecord[],
+  targetVersion: TargetJQueryVersion = '3.7.1',
+): Promise<RecursiveFileAnalysis> {
   const pathMap = new Map<string, File>();
   for (const item of files) {
     pathMap.set(normalizePath(item.filePath), item.file);
@@ -265,7 +270,7 @@ export async function analyzeFileRecursively(rootPath: string, files: FileRecord
 
     visited.add(filePath);
     const content = await readContent(filePath);
-    const fileResult = analyzeCode(content);
+    const fileResult = analyzeCode(content, targetVersion);
 
     pushEntry({
       filePath,
@@ -281,7 +286,7 @@ export async function analyzeFileRecursively(rootPath: string, files: FileRecord
     const inlineScripts = extractInlineScripts(content);
     for (let index = 0; index < inlineScripts.length; index += 1) {
       const inlineScript = inlineScripts[index];
-      const inlineResult = applyLineOffset(analyzeCode(inlineScript.code), inlineScript.startLine - 1);
+      const inlineResult = applyLineOffset(analyzeCode(inlineScript.code, targetVersion), inlineScript.startLine - 1);
       pushEntry({
         filePath: `${filePath}#inline-${index + 1}`,
         displayPath: `${filePath} (script inline #${index + 1}, linea ${inlineScript.startLine})`,

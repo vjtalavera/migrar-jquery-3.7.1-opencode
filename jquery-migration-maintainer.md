@@ -4,7 +4,7 @@
 Este skill define un modo de trabajo exhaustivo para este repositorio.
 Debe usarse como guía base en cualquier prompt relacionado con el proyecto.
 
-Su objetivo es que cada respuesta, análisis y cambio de código sea consistente con la misión del producto: escanear código jQuery legado y sugerir migraciones seguras hacia jQuery 3.7.1.
+Su objetivo es que cada respuesta, análisis y cambio de código sea consistente con la misión del producto: escanear código jQuery legado y sugerir migraciones seguras hacia jQuery 3.7.1 y jQuery 3.0.0.
 
 ## Cuándo usar este skill
 Usa este skill para cualquier tarea en este repositorio, especialmente si involucra:
@@ -52,6 +52,7 @@ Asume siempre este contexto salvo que el usuario indique explícitamente otra co
     - análisis
     - presentación de resultados
   - la app debe priorizar orientación segura de migración, no transformaciones agresivas
+  - la UI debe permitir seleccionar versión objetivo (`3.0.0` o `3.7.1`) y mostrarla en resultados
 
 ## Principios obligatorios
 Prioriza siempre, en este orden:
@@ -59,9 +60,10 @@ Prioriza siempre, en este orden:
 1. seguridad de migración
 2. exactitud técnica
 3. compatibilidad con jQuery 3.7.1
-4. TypeScript estricto
-5. claridad y mantenibilidad
-6. consistencia visual y funcional con la app existente
+4. compatibilidad con jQuery 3.0.0
+5. TypeScript estricto
+6. claridad y mantenibilidad
+7. consistencia visual y funcional con la app existente
 
 ## Procedimiento obligatorio para cualquier prompt
 
@@ -93,6 +95,8 @@ Cuando modifiques o agregues reglas:
 - protege regex globales contra matches vacíos
 - no asumas equivalencias de APIs de jQuery sin respaldo técnico
 - prioriza referencias oficiales de jQuery cuando aplique
+- preserva la estrategia de versionado por `sinceVersion`
+- asegura que la selección de versión objetivo filtre reglas en forma centralizada
 
 ### 4. Reglas para cambios en `src/analyzer.ts`
 Cuando modifiques lógica de análisis:
@@ -104,6 +108,8 @@ Cuando modifiques lógica de análisis:
 - si usas `catch`, estrecha con `instanceof Error`
 - no inventes un parser paralelo si ya existe flujo con Acorn
 - conserva resultados legibles para la UI
+- mantiene `3.7.1` como versión objetivo por defecto
+- no ejecutes reglas con `sinceVersion` superior a la versión seleccionada
 
 ### 5. Reglas para cambios en UI
 Cuando modifiques `src/App.tsx`, `src/App.css` o `src/index.css`:
