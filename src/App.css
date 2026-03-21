@@ -142,6 +142,14 @@ button.secondary:hover {
   border-color: rgba(91, 192, 222, 0.55);
 }
 
+.result-item.selectable {
+  cursor: pointer;
+}
+
+.result-item.selected {
+  box-shadow: 0 0 0 1px rgba(123, 164, 255, 0.5);
+}
+
 .result-header,
 .file-header {
   display: flex;
@@ -433,6 +441,50 @@ button.secondary:hover {
   border-radius: 14px;
   padding: 0.75rem;
   background: rgba(30, 37, 58, 0.8);
+}
+
+.file-preview {
+  margin-top: 0.35rem;
+  border: 1px solid rgba(47, 61, 98, 0.6);
+  border-radius: 8px;
+  max-height: 8.2rem;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  background: rgba(21, 28, 47, 0.75);
+}
+
+.preview-line {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  gap: 0.4rem;
+  align-items: baseline;
+  padding: 0.14rem 0.42rem;
+  border-bottom: 1px solid rgba(61, 75, 112, 0.22);
+}
+
+.preview-line:last-child {
+  border-bottom: none;
+}
+
+.preview-line.focus {
+  background: rgba(123, 164, 255, 0.2);
+}
+
+.preview-line-number,
+.preview-line-text {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.74rem;
+  line-height: 1.2;
+}
+
+.preview-line-number {
+  color: #8da0d4;
+  text-align: right;
+}
+
+.preview-line-text {
+  color: #dbe3ff;
+  overflow-wrap: anywhere;
 }
 
 .dependency-details {
