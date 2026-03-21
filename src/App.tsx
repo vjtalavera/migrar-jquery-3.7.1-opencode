@@ -5,9 +5,9 @@ import {
   MigrationIssue,
   MigrationResult,
 } from './analyzer';
+import { TargetJQueryVersion } from './rules';
 import {
   analyzeFileRecursively,
-  IncludeKind,
   RecursiveFileAnalysis,
 } from './dependencyLayout';
 import './App.css';
@@ -69,50 +69,57 @@ function getValidationLabel(issue: MigrationIssue): string {
   }
 }
 
-function IssueCard({ issue }: { issue: MigrationIssue }) {
+function IssueCard({
+  issue,
+  onSelect,
+  isSelected = false,
+}: {
+  issue: MigrationIssue;
+  onSelect?: () => void;
+  isSelected?: boolean;
+}) {
+  const isClickable = Boolean(onSelect);
+
   return (
-    <article className={`result-item ${getSeverityClass(issue.rule.severity)}`}>
-      <div className="result-header">
+    <article
+      className={`result-item ${getSeverityClass(issue.rule.severity)} ${isClickable ? 'selectable' : ''} ${isSelected ? 'selected' : ''}`}
+      onClick={onSelect}
+    >
+      <div className="issue-top-row">
         <span className="line-number">Linea {issue.lineNumber}</span>
+        <p className="issue-description">{issue.rule.description}</p>
+        <div className="issue-meta-row">
+          <span className="meta-pill">jQuery {issue.rule.sinceVersion}</span>
+          <span className="meta-pill">{issue.rule.sourceType}</span>
+          <span className="meta-pill">{getFixTypeLabel(issue.fixType)}</span>
+          <span className={`meta-pill validation ${issue.validation.status}`}>{getValidationLabel(issue)}</span>
+        </div>
         <span className={`issue-type ${getSeverityClass(issue.rule.severity)}`}>
           {issue.rule.severity.toUpperCase()}: {issue.rule.name}
         </span>
       </div>
 
-      <p className="issue-description">{issue.rule.description}</p>
-
-      <div className="issue-meta-row">
-        <span className="meta-pill">jQuery {issue.rule.sinceVersion}</span>
-        <span className="meta-pill">{issue.rule.sourceType}</span>
-        <span className="meta-pill">{getFixTypeLabel(issue.fixType)}</span>
-        <span className={`meta-pill validation ${issue.validation.status}`}>{getValidationLabel(issue)}</span>
-      </div>
-
       <div className="code-block">
         <div className="original-code">
-          <strong>Original:</strong>
-          <br />
           {issue.line}
         </div>
 
         {issue.suggestedLine ? (
           <div className={`migrated-code ${issue.validation.status === 'invalid' ? 'syntax-error' : ''}`}>
-            <strong>{issue.fixType === 'manual' ? 'Sugerencia:' : 'Linea propuesta:'}</strong>
-            <br />
             {issue.suggestedLine}
           </div>
         ) : (
           <div className="migrated-code syntax-note">
-            <strong>Sin linea propuesta:</strong>
-            <br />
-            {issue.note ?? 'No hay correccion automatica segura para este caso.'}
+            <strong>Sin linea propuesta:</strong> {issue.note ?? 'No hay correccion automatica segura para este caso.'}
           </div>
         )}
       </div>
 
       {issue.note && issue.suggestedLine && <p className="extra-note">{issue.note}</p>}
-      {issue.validation.message && <p className="validation-detail">{issue.validation.message}</p>}
-      <p className="source-link">Fuente oficial: <a href={issue.rule.sourceUrl} target="_blank" rel="noreferrer">{issue.rule.sourceUrl}</a></p>
+      <div className="issue-footer">
+        {issue.validation.message && <span className="validation-detail">{issue.validation.message}</span>}
+        <span className="source-link">Fuente oficial: <a href={issue.rule.sourceUrl} target="_blank" rel="noreferrer">{issue.rule.sourceUrl}</a></span>
+      </div>
     </article>
   );
 }
@@ -127,52 +134,108 @@ interface FolderFileEntry {
   result: MigrationResult | null;
   recursiveAnalysis: RecursiveFileAnalysis | null;
   selectedRecursiveEntryId: string | null;
+  selectedIssueLine: number | null;
+  fileContent: string;
   error?: string;
 }
 
-function getIncludeKindLabel(kind: IncludeKind): string {
-  if (kind === 'root') {
-    return 'archivo base';
-  }
-
-  if (kind === 'jsp-include') {
-    return 'jsp include';
-  }
-
-  if (kind === 'script-src') {
-    return 'script src';
-  }
-
-  return 'script inline';
+interface RouteApiFile {
+  filePath: string;
+  content: string;
 }
 
-function sortByReferenceLine(left: { referenceLine?: number; displayPath: string }, right: { referenceLine?: number; displayPath: string }): number {
-  const leftLine = left.referenceLine ?? Number.MAX_SAFE_INTEGER;
-  const rightLine = right.referenceLine ?? Number.MAX_SAFE_INTEGER;
+function normalizeLocalPath(path: string): string {
+  return path
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\.\//, '')
+    .toLowerCase();
+}
 
-  if (leftLine !== rightLine) {
-    return leftLine - rightLine;
+function parseRouteLines(value: string): string[] {
+  const unique = new Set<string>();
+
+  for (const line of value.split('\n')) {
+    const normalized = normalizeLocalPath(line);
+    if (normalized) {
+      unique.add(normalized);
+    }
   }
 
-  return left.displayPath.localeCompare(right.displayPath);
+  return Array.from(unique);
+}
+
+function matchesRoutePath(filePath: string, routePath: string): boolean {
+  const normalizedFilePath = normalizeLocalPath(filePath);
+
+  return normalizedFilePath === routePath
+    || normalizedFilePath.endsWith(`/${routePath}`)
+    || normalizedFilePath.startsWith(`${routePath}/`)
+    || normalizedFilePath.includes(`/${routePath}/`)
+    || routePath.endsWith(`/${normalizedFilePath}`);
+}
+
+function filterEntriesByRoutes(entries: FolderFileEntry[], routePaths: string[]): FolderFileEntry[] {
+  if (routePaths.length === 0) {
+    return entries;
+  }
+
+  return entries.filter((entry) => routePaths.some((routePath) => matchesRoutePath(entry.filePath, routePath)));
+}
+
+interface PreviewLine {
+  lineNumber: number;
+  text: string;
+}
+
+function getFilePreviewLines(content: string): PreviewLine[] {
+  const lines = content.split('\n');
+  const previewLines: PreviewLine[] = [];
+  for (let lineNumber = 1; lineNumber <= lines.length; lineNumber += 1) {
+    previewLines.push({
+      lineNumber,
+      text: lines[lineNumber - 1],
+    });
+  }
+
+  return previewLines;
+}
+
+function buildPreviewLineId(entryId: string, lineNumber: number): string {
+  return `preview-${encodeURIComponent(entryId)}-${lineNumber}`;
+}
+
+function getFileNameFromPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || 'archivo';
 }
 
 function getDefaultRecursiveEntryId(analysis: RecursiveFileAnalysis): string | null {
-  const firstRecursiveWithResult = analysis.entries.find((entry) => entry.kind !== 'root' && entry.result);
+  const firstRecursiveWithResult = analysis.entries.find(
+    (entry) => (entry.kind === 'jsp-include' || entry.kind === 'script-src') && entry.result,
+  );
   if (firstRecursiveWithResult) {
     return firstRecursiveWithResult.id;
   }
 
-  const firstRecursive = analysis.entries.find((entry) => entry.kind !== 'root');
+  const firstRecursive = analysis.entries.find(
+    (entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src',
+  );
   return firstRecursive?.id ?? null;
 }
 
 function App() {
-  const [mode, setMode] = useState<'code' | 'folder'>('code');
+  const [mode, setMode] = useState<'code' | 'folder' | 'routes'>('code');
+  const [targetVersion, setTargetVersion] = useState<TargetJQueryVersion>('3.7.1');
   const [code, setCode] = useState('');
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [folderFiles, setFolderFiles] = useState<FolderFileEntry[]>([]);
   const [skippedFilesCount, setSkippedFilesCount] = useState(0);
+  const [routeInput, setRouteInput] = useState('');
+  const [routeHint, setRouteHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const analyzedFiles = folderFiles.filter((file) => file.isAnalyzed);
@@ -205,7 +268,7 @@ function App() {
   const handleAnalyze = () => {
     setFolderFiles([]);
     setSkippedFilesCount(0);
-    setResult(analyzeCode(code));
+    setResult(analyzeCode(code, targetVersion));
   };
 
   const handleLoadSample = () => {
@@ -213,11 +276,85 @@ function App() {
     setResult(null);
     setFolderFiles([]);
     setSkippedFilesCount(0);
+    setRouteInput('');
+    setRouteHint(null);
     setMode('code');
   };
 
   const handleSelectFolder = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleAnalyzeRoutes = async (): Promise<void> => {
+    const routePaths = parseRouteLines(routeInput);
+    if (routePaths.length === 0) {
+      setRouteHint('Ingresa al menos una ruta por linea.');
+      return;
+    }
+
+    setRouteHint('Analizando rutas...');
+
+    try {
+      const apiUrl = new URL('api/local-routes/files', window.location.href).toString();
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          routes: routePaths,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status} al leer rutas locales.`);
+      }
+
+      const payload = await response.json() as { files?: RouteApiFile[]; error?: string };
+      if (payload.error) {
+        throw new Error(payload.error);
+      }
+
+      const files = payload.files ?? [];
+      const entries: FolderFileEntry[] = files.map((item, index) => ({
+        id: `${item.filePath}-${index}`,
+        file: new File([item.content], getFileNameFromPath(item.filePath), { type: 'text/plain' }),
+        filePath: item.filePath,
+        isAnalyzing: false,
+        isAnalyzed: false,
+        isExpanded: false,
+        result: null,
+        recursiveAnalysis: null,
+        selectedRecursiveEntryId: null,
+        selectedIssueLine: null,
+        fileContent: item.content,
+      }));
+
+      const filteredEntries = filterEntriesByRoutes(entries, routePaths);
+      setFolderFiles(filteredEntries);
+      setSkippedFilesCount(0);
+      setRouteHint(`${filteredEntries.length} archivo(s) cargado(s) por rutas. Selecciona un archivo para analizar.`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'No se pudieron analizar las rutas locales.';
+      setRouteHint(message);
+    }
+  };
+
+  const handleTargetVersionChange = (version: TargetJQueryVersion) => {
+    setTargetVersion(version);
+    setResult(null);
+    setFolderFiles((current) => current.map((entry) => ({
+      ...entry,
+      isAnalyzing: false,
+      isAnalyzed: false,
+      isExpanded: false,
+      result: null,
+      recursiveAnalysis: null,
+      selectedRecursiveEntryId: null,
+      selectedIssueLine: null,
+      fileContent: '',
+      error: undefined,
+    })));
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -230,8 +367,7 @@ function App() {
     const selectedFiles = Array.from(files);
     const allowedFiles = selectedFiles.filter((file) => isAllowedFile(file.name));
 
-    setFolderFiles(
-      allowedFiles.map((file, index) => ({
+    const entries = allowedFiles.map((file, index) => ({
         id: `${file.webkitRelativePath || file.name}-${index}`,
         file,
         filePath: file.webkitRelativePath || file.name,
@@ -241,14 +377,22 @@ function App() {
         result: null,
         recursiveAnalysis: null,
         selectedRecursiveEntryId: null,
-      })),
-    );
+        selectedIssueLine: null,
+        fileContent: '',
+      }));
+
+    setFolderFiles(entries);
+
     setSkippedFilesCount(selectedFiles.length - allowedFiles.length);
     event.target.value = '';
   };
 
-  const handleAnalyzeFile = async (entryId: string, filePath: string): Promise<void> => {
-    const fileRecords = folderFiles.map((entry) => ({
+  const handleAnalyzeFile = async (
+    entryId: string,
+    filePath: string,
+    sourceEntries: FolderFileEntry[] = folderFiles,
+  ): Promise<void> => {
+    const fileRecords = sourceEntries.map((entry) => ({
       filePath: entry.filePath,
       file: entry.file,
     }));
@@ -260,10 +404,13 @@ function App() {
     )));
 
     try {
-      const recursiveAnalysis = await analyzeFileRecursively(filePath, fileRecords);
+      const sourceFile = sourceEntries.find((entry) => entry.id === entryId)?.file;
+      const fileContent = sourceFile ? await sourceFile.text() : '';
+      const recursiveAnalysis = await analyzeFileRecursively(filePath, fileRecords, targetVersion);
       const rootEntry = recursiveAnalysis.entries.find((entry) => entry.kind === 'root');
       const rootResult = rootEntry?.result ?? null;
       const defaultSelectedRecursiveEntryId = getDefaultRecursiveEntryId(recursiveAnalysis);
+      const selectedIssueLine = rootResult?.issues[0]?.lineNumber ?? null;
 
       setFolderFiles((current) => current.map((entry) => (
         entry.id === entryId
@@ -275,6 +422,8 @@ function App() {
               result: rootResult,
               recursiveAnalysis,
               selectedRecursiveEntryId: defaultSelectedRecursiveEntryId,
+              selectedIssueLine,
+              fileContent,
               error: undefined,
             }
           : entry
@@ -292,6 +441,8 @@ function App() {
               result: null,
               recursiveAnalysis: null,
               selectedRecursiveEntryId: null,
+              selectedIssueLine: null,
+              fileContent: '',
               error: message,
             }
           : entry
@@ -328,6 +479,19 @@ function App() {
     )));
   };
 
+  const handleSelectIssueLine = (folderEntryId: string, lineNumber: number) => {
+    setFolderFiles((current) => current.map((entry) => (
+      entry.id === folderEntryId
+        ? { ...entry, selectedIssueLine: lineNumber }
+        : entry
+    )));
+
+    requestAnimationFrame(() => {
+      const targetElement = document.getElementById(buildPreviewLineId(folderEntryId, lineNumber));
+      targetElement?.scrollIntoView({ block: 'center' });
+    });
+  };
+
   return (
     <div className="app">
       <header className="hero">
@@ -345,6 +509,25 @@ function App() {
           </button>
           <button className={`tab ${mode === 'folder' ? 'active' : ''}`} onClick={() => setMode('folder')}>
             Seleccionar carpeta
+          </button>
+          <button className={`tab ${mode === 'routes' ? 'active' : ''}`} onClick={() => setMode('routes')}>
+            Seleccionar rutas
+          </button>
+        </div>
+
+        <div className="version-tabs">
+          <span className="version-label">Version objetivo</span>
+          <button
+            className={`tab ${targetVersion === '3.0.0' ? 'active' : ''}`}
+            onClick={() => handleTargetVersionChange('3.0.0')}
+          >
+            jQuery 3.0.0
+          </button>
+          <button
+            className={`tab ${targetVersion === '3.7.1' ? 'active' : ''}`}
+            onClick={() => handleTargetVersionChange('3.7.1')}
+          >
+            jQuery 3.7.1
           </button>
         </div>
 
@@ -368,7 +551,7 @@ function App() {
           </>
         )}
 
-        {mode === 'folder' && (
+        {(mode === 'folder' || mode === 'routes') && (
           <div className="folder-section">
             <input
               ref={fileInputRef}
@@ -380,9 +563,28 @@ function App() {
               style={{ display: 'none' }}
             />
             <div className="folder-select">
-              <button onClick={handleSelectFolder}>
-                Seleccionar carpeta
-              </button>
+              {mode === 'folder' && (
+                <button onClick={handleSelectFolder}>
+                  Seleccionar carpeta
+                </button>
+              )}
+
+              {mode === 'routes' && (
+                <>
+                  <span className="folder-hint">Ingresa rutas manuales (una por linea) y pulsa "Analizar rutas".</span>
+                  <textarea
+                    className="local-paths-input"
+                    value={routeInput}
+                    onChange={(event) => setRouteInput(event.target.value)}
+                    placeholder={'Una ruta por linea\nEjemplo:\nC:/proyecto-a/webapp/WEB-INF/jsp/home.jsp\nC:/proyecto-b/webapp/js/legacy.js'}
+                  />
+                  <button type="button" className="secondary" onClick={() => void handleAnalyzeRoutes()}>
+                    Analizar rutas
+                  </button>
+                  {routeHint && <span className="folder-hint">{routeHint}</span>}
+                </>
+              )}
+
               <span className="folder-hint">Se analizan recursivamente `jsp`, `js`, `html` y `htm`.</span>
               {skippedFilesCount > 0 && (
                 <span className="folder-hint">{skippedFilesCount} archivo(s) ignorado(s) por extension no compatible.</span>
@@ -395,6 +597,7 @@ function App() {
       {result && (
         <section className="results">
           <div className="stats">
+            <div className="stat">Version objetivo: <strong>{targetVersion}</strong></div>
             <div className="stat">Lineas: <strong>{result.totalLines}</strong></div>
             <div className="stat">Errores: <strong className="error-text">{result.summary.errors}</strong></div>
             <div className="stat">Warnings: <strong className="warning-text">{result.summary.warnings}</strong></div>
@@ -412,9 +615,10 @@ function App() {
         </section>
       )}
 
-      {mode === 'folder' && folderFiles.length > 0 && (
+      {(mode === 'folder' || mode === 'routes') && folderFiles.length > 0 && (
         <section className="results">
           <div className="folder-stats">
+            <div className="stat">Version objetivo: <strong>{targetVersion}</strong></div>
             <div className="stat">Archivos detectados: <strong>{folderFiles.length}</strong></div>
             <div className="stat">Pendientes: <strong>{pendingFiles}</strong></div>
             <div className="stat">Analizados: <strong>{analyzedFiles.length}</strong></div>
@@ -440,10 +644,10 @@ function App() {
                   </span>
                   {fileEntry.isAnalyzed && (
                     <>
-                      <span>{fileEntry.recursiveAnalysis?.totalIssues ?? 0} incidencias</span>
-                      <span className="error-text">{fileEntry.recursiveAnalysis?.summary.errors ?? 0} errores</span>
-                      <span className="warning-text">{fileEntry.recursiveAnalysis?.summary.warnings ?? 0} warnings</span>
-                      <span className="info-text">{fileEntry.recursiveAnalysis?.summary.info ?? 0} info</span>
+                      <span>{fileEntry.result?.issues.length ?? 0} incidencias</span>
+                      <span className="error-text">{fileEntry.result?.summary.errors ?? 0} errores</span>
+                      <span className="warning-text">{fileEntry.result?.summary.warnings ?? 0} warnings</span>
+                      <span className="info-text">{fileEntry.result?.summary.info ?? 0} info</span>
                     </>
                   )}
                 </span>
@@ -463,22 +667,32 @@ function App() {
                     <div className="recursive-left">
                       {fileEntry.result ? (
                         <section className="included-result">
-                          <div className="included-header">
-                            <span className="file-path">{fileEntry.filePath}</span>
-                            <span className="file-stats">
-                              <span>{fileEntry.result.issues.length} incidencias</span>
-                              <span className="error-text">{fileEntry.result.summary.errors} errores</span>
-                              <span className="warning-text">{fileEntry.result.summary.warnings} warnings</span>
-                              <span className="info-text">{fileEntry.result.summary.info} info</span>
-                            </span>
-                          </div>
-
                           {fileEntry.result.issues.length === 0 ? (
                             <div className="no-issues">No se detectaron hallazgos en el archivo base.</div>
                           ) : (
                             fileEntry.result.issues.map((issue, index) => (
-                              <IssueCard key={`${fileEntry.id}-root-${issue.rule.id}-${index}`} issue={issue} />
+                              <IssueCard
+                                key={`${fileEntry.id}-root-${issue.rule.id}-${index}`}
+                                issue={issue}
+                                onSelect={() => handleSelectIssueLine(fileEntry.id, issue.lineNumber)}
+                                isSelected={fileEntry.selectedIssueLine === issue.lineNumber}
+                              />
                             ))
+                          )}
+
+                          {fileEntry.fileContent && fileEntry.selectedIssueLine && (
+                            <div className="file-preview">
+                              {getFilePreviewLines(fileEntry.fileContent).map((line) => (
+                                <div
+                                  key={`${fileEntry.id}-preview-${line.lineNumber}`}
+                                  id={buildPreviewLineId(fileEntry.id, line.lineNumber)}
+                                  className={`preview-line ${line.lineNumber === fileEntry.selectedIssueLine ? 'focus' : ''}`}
+                                >
+                                  <span className="preview-line-number">{line.lineNumber}</span>
+                                  <span className="preview-line-text">{line.text || ' '}</span>
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </section>
                       ) : (
@@ -489,11 +703,10 @@ function App() {
                     <div className="recursive-right">
                       {(() => {
                         const recursiveEntries = fileEntry.recursiveAnalysis.entries
-                          .filter((entry) => entry.kind !== 'root')
-                          .sort(sortByReferenceLine);
+                          .filter((entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src');
 
                         if (recursiveEntries.length === 0) {
-                          return <div className="no-issues">No se detectaron includes ni scripts recursivos.</div>;
+                          return <div className="no-issues">No se detectaron archivos recursivos.</div>;
                         }
 
                         return (
@@ -511,9 +724,8 @@ function App() {
                                       style={{ paddingLeft: `${entry.depth * 1.1}rem` }}
                                       onClick={() => handleSelectRecursiveEntry(fileEntry.id, entry.id)}
                                     >
-                                      <span className="dependency-kind">{getIncludeKindLabel(entry.kind)}</span>
                                       <span className="dependency-path">{entry.displayPath}</span>
-                                      {entry.referenceLine && <span className="dependency-count">ref linea {entry.referenceLine}</span>}
+                                      {entry.referenceLine && <span className="dependency-count">linea {entry.referenceLine}</span>}
                                       {entry.result && <span className="dependency-count">{entry.result.issues.length} incidencias</span>}
                                       {!entry.found && <span className="dependency-count">no encontrado</span>}
                                     </button>
@@ -531,9 +743,8 @@ function App() {
                                         {entry.result && entry.result.issues.length > 0 && (
                                           <>
                                             <div className="included-header">
-                                              <span className="file-path">{entry.displayPath}</span>
                                               <span className="file-stats">
-                                                {entry.referenceLine && <span>ref linea {entry.referenceLine}</span>}
+                                                {entry.referenceLine && <span>linea {entry.referenceLine}</span>}
                                                 <span>{entry.result.issues.length} incidencias</span>
                                                 <span className="error-text">{entry.result.summary.errors} errores</span>
                                                 <span className="warning-text">{entry.result.summary.warnings} warnings</span>

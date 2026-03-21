@@ -2,7 +2,7 @@
 
 ## Purpose
 This repository is a frontend tool for scanning legacy jQuery code and
-suggesting migration steps toward jQuery 3.7.1.
+suggesting migration steps toward jQuery 3.7.1 and jQuery 3.0.0.
 
 Agents should optimize for safe migration guidance, strict TypeScript, and
 readable code over clever abstractions.
@@ -13,13 +13,15 @@ readable code over clever abstractions.
 - TypeScript 5
 - Acorn for parsing and syntax validation
 - Plain CSS in `src/index.css` and `src/App.css`
+- Local route-loading API served from `vite.config.ts` during dev/preview
 
 ## Repository Layout
 - `src/main.tsx`: React bootstrap and root render.
-- `src/App.tsx`: main UI, state, and event handlers.
-- `src/analyzer.ts`: scan logic, summaries, file analysis, exported types.
+- `src/App.tsx`: main UI, target-version selector, mode selector (`code`, `folder`, `routes`), state, and event handlers.
+- `src/analyzer.ts`: scan logic, summaries, file analysis, exported types, target-version filtering.
 - `src/dependencyLayout.ts`: recursive include/script discovery and per-node analysis.
-- `src/rules.ts`: migration rule catalog, regexes, suggestion builders.
+- `src/rules.ts`: migration rule catalog, regexes, suggestion builders, target-version rule selection.
+- `vite.config.ts`: Vite setup plus local API endpoint for loading local filesystem routes.
 - `src/index.css`: global resets and base layout.
 - `src/App.css`: feature-specific styling.
 - `dist/`: generated output; do not edit manually.
@@ -115,9 +117,16 @@ and loose typing shortcuts that only work in less strict projects.
   copy or localization strategy.
 - Preserve the current analyzer-first flow: input, analyze action, then results.
 - In folder mode, keep on-demand analysis per selected file (no forced full scan).
+- In routes mode, load candidate files from local routes via API and keep on-demand per-file analysis.
 - Preserve the two-column recursive panel behavior:
   - left column: base-file issues,
   - right column: recursive include/script tree with expandable node issues.
+- Keep the target-version selector visible and explicit in analysis results.
+- In the issue list, keep the top row compact (single-line when possible) and avoid duplicate labels.
+- Keep the read-only file preview at the end of base-file issues with:
+  - max visible height and vertical scroll,
+  - line focus when selecting an issue,
+  - compact spacing for dense review.
 
 ## Analyzer And Rule Authoring
 - Keep analyzer helpers pure when possible.
@@ -141,6 +150,10 @@ and loose typing shortcuts that only work in less strict projects.
   `:even`, `:odd`), prefer deterministic chain rewrites over dropping tokens.
 - Only expose `suggestedLine` when the rewritten line is actually different from
   the original detected segment.
+- Keep version-aware filtering centralized in analyzer/rules integration.
+- Supported target versions today are `3.0.0` and `3.7.1`.
+- The default target version is `3.7.1` for backward compatibility.
+- Rules whose `sinceVersion` is above the selected target version must not run.
 
 ## Recursive Include Layout
 - Keep recursive dependency extraction in `src/dependencyLayout.ts`.

@@ -3,7 +3,7 @@
 ## Proposito
 Este skill define un modo operativo exhaustivo para mantener este repositorio.
 Debe usarse como guia base para cualquier prompt relacionado con la herramienta
-de migracion a jQuery 3.7.1.
+de migracion a jQuery 3.7.1 y jQuery 3.0.0.
 
 ## Relacion con AGENTS.md
 Este skill no reemplaza `AGENTS.md`; lo extiende.
@@ -16,10 +16,14 @@ Reglas de precedencia:
 ## Contexto permanente
 - Stack: Vite 5, React 18, TypeScript 5, Acorn, CSS plano.
 - Archivos clave:
-  - `src/App.tsx`: UI y estados de analisis.
+  - `src/App.tsx`: UI y estados de analisis (`code`, `folder`, `routes`).
   - `src/analyzer.ts`: deteccion, normalizacion y resultado.
   - `src/dependencyLayout.ts`: layout recursivo de includes/scripts y analisis por nodo.
   - `src/rules.ts`: catalogo de reglas y sugerencias.
+  - `vite.config.ts`: API local para carga de archivos por rutas del sistema.
+- Versiones objetivo soportadas:
+  - `3.0.0`
+  - `3.7.1` (default)
 - Verificacion disponible:
   - `npx tsc --noEmit`
   - `npm run build`
@@ -48,12 +52,18 @@ Reglas de precedencia:
 - Priorizar cambios minimos, seguros y trazables.
 - Mantener TypeScript estricto, sin `any`.
 - Preservar el flujo de UI: entrada -> analisis -> resultados.
+- Preservar selector de version objetivo y su reflejo explicito en resultados.
+- Centralizar filtrado por version objetivo en analyzer/rules (evitar filtros duplicados en UI).
+- No ejecutar reglas cuyo `sinceVersion` sea mayor a la version objetivo seleccionada.
 - En modo carpeta, preservar analisis bajo demanda por archivo seleccionado.
+- En modo rutas, preservar carga por API local de `vite.config.ts` y analisis bajo demanda por archivo.
 - Preservar layout de dos columnas en resultados recursivos:
   - izquierda: incidencias del archivo base,
   - derecha: arbol recursivo y detalle desplegable por nodo.
 - Mantener orden del arbol recursivo por `referenceLine` ascendente.
 - Mantener offset de lineas en scripts inline para reportar lineas reales.
+- En incidencias, priorizar densidad visual: fila superior compacta (una linea cuando sea viable), sin duplicar etiquetas.
+- Mantener preview final de archivo base en modo solo lectura con foco por linea y scroll vertical.
 - Mantener texto de interfaz en espanol salvo instruccion explicita.
 - No editar `dist/` manualmente.
 
