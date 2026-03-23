@@ -128,7 +128,7 @@ button:disabled {
   font-family: 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   background: #f8fafd;
-  padding: 0.75rem;
+  padding: 6px;
   border-radius: 4px;
   overflow-x: auto;
 }

@@ -506,6 +506,131 @@ function summarizeIssues(issues: MigrationIssue[]): MigrationSummary {
   return summary;
 }
 
+interface SuggestedLinePatch {
+  start: number;
+  end: number;
+  replacement: string;
+}
+
+function extractSuggestedLinePatch(baseLine: string, suggestedLine: string): SuggestedLinePatch | null {
+  if (baseLine === suggestedLine) {
+    return null;
+  }
+
+  let start = 0;
+  while (
+    start < baseLine.length
+    && start < suggestedLine.length
+    && baseLine[start] === suggestedLine[start]
+  ) {
+    start += 1;
+  }
+
+  let baseEnd = baseLine.length;
+  let suggestedEnd = suggestedLine.length;
+  while (
+    baseEnd > start
+    && suggestedEnd > start
+    && baseLine[baseEnd - 1] === suggestedLine[suggestedEnd - 1]
+  ) {
+    baseEnd -= 1;
+    suggestedEnd -= 1;
+  }
+
+  return {
+    start,
+    end: baseEnd,
+    replacement: suggestedLine.slice(start, suggestedEnd),
+  };
+}
+
+function buildMergedSuggestedLine(baseLine: string, suggestedLines: string[]): string | undefined {
+  const patches = suggestedLines
+    .map((suggestedLine) => extractSuggestedLinePatch(baseLine, suggestedLine))
+    .filter((patch): patch is SuggestedLinePatch => Boolean(patch))
+    .sort((left, right) => {
+      if (left.start !== right.start) {
+        return left.start - right.start;
+      }
+
+      return (right.end - right.start) - (left.end - left.start);
+    });
+
+  if (patches.length < 2) {
+    return undefined;
+  }
+
+  const applicablePatches: SuggestedLinePatch[] = [];
+  let consumedUntil = 0;
+
+  for (const patch of patches) {
+    if (patch.start < consumedUntil) {
+      continue;
+    }
+
+    applicablePatches.push(patch);
+    consumedUntil = patch.end;
+  }
+
+  if (applicablePatches.length < 2) {
+    return undefined;
+  }
+
+  let merged = '';
+  let cursor = 0;
+
+  for (const patch of applicablePatches) {
+    merged += baseLine.slice(cursor, patch.start);
+    merged += patch.replacement;
+    cursor = patch.end;
+  }
+
+  merged += baseLine.slice(cursor);
+  return merged === baseLine ? undefined : merged;
+}
+
+function consolidateSuggestedLinesByLine(issues: MigrationIssue[]): void {
+  const issueIndexesByLine = new Map<number, number[]>();
+
+  for (let index = 0; index < issues.length; index += 1) {
+    const issue = issues[index];
+    const indexes = issueIndexesByLine.get(issue.lineNumber);
+    if (indexes) {
+      indexes.push(index);
+    } else {
+      issueIndexesByLine.set(issue.lineNumber, [index]);
+    }
+  }
+
+  for (const issueIndexes of issueIndexesByLine.values()) {
+    if (issueIndexes.length < 2) {
+      continue;
+    }
+
+    const baseLine = issues[issueIndexes[0]].line;
+    const suggestedLines = issueIndexes
+      .map((index) => issues[index].suggestedLine)
+      .filter((suggestedLine): suggestedLine is string => Boolean(suggestedLine));
+
+    if (suggestedLines.length < 2) {
+      continue;
+    }
+
+    const mergedSuggestedLine = buildMergedSuggestedLine(baseLine, suggestedLines);
+    if (!mergedSuggestedLine) {
+      continue;
+    }
+
+    for (const issueIndex of issueIndexes) {
+      if (!issues[issueIndex].suggestedLine) {
+        continue;
+      }
+
+      issues[issueIndex].suggestedLine = mergedSuggestedLine;
+    }
+  }
+}
+
 export function analyzeCode(code: string, targetVersion: TargetJQueryVersion = '3.7.1'): MigrationResult {
   const lines = code.split('\n');
   const issues: MigrationIssue[] = [];
@@ -567,6 +692,8 @@ export function analyzeCode(code: string, targetVersion: TargetJQueryVersion = '
       }
     }
   }
+
+  consolidateSuggestedLinesByLine(issues);
 
   return {
     issues,
