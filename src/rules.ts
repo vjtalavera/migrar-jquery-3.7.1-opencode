@@ -73,82 +73,735 @@ function toNumericIndex(value: string): number | null {
   return Number.parseInt(trimmed, 10);
 }
 
-function buildSelectorMigration(selector: string): { selector: string; chain: string } | undefined {
-  const pseudoPattern = /:(eq|gt|lt)\s*\(([^)]+)\)|:(first|last|even|odd)\b/g;
-  const chainParts: string[] = [];
-  let hasDeprecatedPseudo = false;
-  let match: RegExpExecArray | null;
+type DeprecatedSelectorPseudo = 'eq' | 'gt' | 'lt' | 'first' | 'last' | 'even' | 'odd';
 
-  while ((match = pseudoPattern.exec(selector)) !== null) {
-    hasDeprecatedPseudo = true;
+interface DeprecatedSelectorToken {
+  name: DeprecatedSelectorPseudo;
+  start: number;
+  end: number;
+  arg?: string;
+}
 
-    if (match[1]) {
-      const method = match[1];
-      const rawArg = (match[2] ?? '').trim();
-      const numericArg = toNumericIndex(rawArg);
+function isSelectorIdentifierChar(value: string): boolean {
+  return /[A-Za-z0-9_-]/.test(value);
+}
 
-      if (method === 'eq') {
-        chainParts.push(`.eq(${rawArg})`);
-      } else if (method === 'gt') {
-        if (numericArg !== null) {
-          chainParts.push(`.slice(${numericArg + 1})`);
-        } else {
-          chainParts.push(`.filter((index) => index > (${rawArg}))`);
-        }
-      } else if (method === 'lt') {
-        if (numericArg !== null) {
-          chainParts.push(`.slice(0, ${numericArg})`);
-        } else {
-          chainParts.push(`.filter((index) => index < (${rawArg}))`);
-        }
+function hasTopLevelComma(selector: string): boolean {
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let quote: 'single' | 'double' | null = null;
+
+  for (let index = 0; index < selector.length; index += 1) {
+    const char = selector[index];
+    const previousChar = selector[index - 1];
+
+    if (quote) {
+      if (quote === 'single' && char === '\'' && previousChar !== '\\') {
+        quote = null;
+      } else if (quote === 'double' && char === '"' && previousChar !== '\\') {
+        quote = null;
       }
-
       continue;
     }
 
-    const shorthand = match[3];
-    if (shorthand === 'first') {
-      chainParts.push('.first()');
-    } else if (shorthand === 'last') {
-      chainParts.push('.last()');
-    } else if (shorthand === 'even') {
-      chainParts.push('.filter((index) => index % 2 === 0)');
-    } else if (shorthand === 'odd') {
-      chainParts.push('.filter((index) => index % 2 === 1)');
+    if (char === '\'') {
+      quote = 'single';
+      continue;
+    }
+
+    if (char === '"') {
+      quote = 'double';
+      continue;
+    }
+
+    if (char === '[') {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (char === ']' && bracketDepth > 0) {
+      bracketDepth -= 1;
+      continue;
+    }
+
+    if (char === '(' && bracketDepth === 0) {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (char === ')' && bracketDepth === 0 && parenDepth > 0) {
+      parenDepth -= 1;
+      continue;
+    }
+
+    if (char === ',' && bracketDepth === 0 && parenDepth === 0) {
+      return true;
     }
   }
 
-  if (!hasDeprecatedPseudo) {
+  return false;
+}
+
+function findDeprecatedSelectorTokens(selector: string): DeprecatedSelectorToken[] {
+  const tokens: DeprecatedSelectorToken[] = [];
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let quote: 'single' | 'double' | null = null;
+
+  for (let index = 0; index < selector.length; index += 1) {
+    const char = selector[index];
+    const previousChar = selector[index - 1];
+
+    if (quote) {
+      if (quote === 'single' && char === '\'' && previousChar !== '\\') {
+        quote = null;
+      } else if (quote === 'double' && char === '"' && previousChar !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '\'') {
+      quote = 'single';
+      continue;
+    }
+
+    if (char === '"') {
+      quote = 'double';
+      continue;
+    }
+
+    if (char === '[') {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (char === ']' && bracketDepth > 0) {
+      bracketDepth -= 1;
+      continue;
+    }
+
+    if (char === '(' && bracketDepth === 0) {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (char === ')' && bracketDepth === 0 && parenDepth > 0) {
+      parenDepth -= 1;
+      continue;
+    }
+
+    if (char !== ':' || bracketDepth !== 0 || parenDepth !== 0 || previousChar === ':') {
+      continue;
+    }
+
+    let cursor = index + 1;
+    while (cursor < selector.length && /[A-Za-z-]/.test(selector[cursor])) {
+      cursor += 1;
+    }
+
+    const pseudoName = selector.slice(index + 1, cursor);
+    if (pseudoName === 'first' || pseudoName === 'last' || pseudoName === 'even' || pseudoName === 'odd') {
+      if (cursor < selector.length && isSelectorIdentifierChar(selector[cursor])) {
+        continue;
+      }
+
+      tokens.push({
+        name: pseudoName,
+        start: index,
+        end: cursor,
+      });
+      index = cursor - 1;
+      continue;
+    }
+
+    if (pseudoName !== 'eq' && pseudoName !== 'gt' && pseudoName !== 'lt') {
+      continue;
+    }
+
+    let argumentCursor = cursor;
+    while (argumentCursor < selector.length && /\s/.test(selector[argumentCursor])) {
+      argumentCursor += 1;
+    }
+
+    if (selector[argumentCursor] !== '(') {
+      continue;
+    }
+
+    const argumentStart = argumentCursor + 1;
+    let localDepth = 1;
+    argumentCursor += 1;
+
+    while (argumentCursor < selector.length && localDepth > 0) {
+      if (selector[argumentCursor] === '(') {
+        localDepth += 1;
+      } else if (selector[argumentCursor] === ')') {
+        localDepth -= 1;
+      }
+
+      argumentCursor += 1;
+    }
+
+    if (localDepth !== 0) {
+      continue;
+    }
+
+    const argumentEnd = argumentCursor - 1;
+    tokens.push({
+      name: pseudoName,
+      start: index,
+      end: argumentCursor,
+      arg: selector.slice(argumentStart, argumentEnd).trim(),
+    });
+    index = argumentCursor - 1;
+  }
+
+  return tokens;
+}
+
+function areDeprecatedTokensTrailing(selector: string, tokens: DeprecatedSelectorToken[]): boolean {
+  if (tokens.length === 0) {
+    return false;
+  }
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const current = tokens[index];
+    const nextToken = tokens[index + 1];
+    const trailingSlice = nextToken
+      ? selector.slice(current.end, nextToken.start)
+      : selector.slice(current.end);
+
+    if (trailingSlice.trim() !== '') {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function buildSelectorMigration(
+  selector: string,
+  options: { allowNonTrailing?: boolean } = {},
+): { selector: string; chain: string } | undefined {
+  if (hasTopLevelComma(selector)) {
     return undefined;
   }
 
-  const cleanedSelector = selector
-    .replace(/:(eq|gt|lt)\s*\(([^)]+)\)|:(first|last|even|odd)\b/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  const deprecatedTokens = findDeprecatedSelectorTokens(selector);
+  if (deprecatedTokens.length === 0) {
+    return undefined;
+  }
+
+  if (!options.allowNonTrailing && !areDeprecatedTokensTrailing(selector, deprecatedTokens)) {
+    return undefined;
+  }
+
+  const chainParts: string[] = [];
+
+  for (const token of deprecatedTokens) {
+    if (token.name === 'first') {
+      chainParts.push('.first()');
+      continue;
+    }
+
+    if (token.name === 'last') {
+      chainParts.push('.last()');
+      continue;
+    }
+
+    if (token.name === 'even') {
+      chainParts.push('.filter((index) => index % 2 === 0)');
+      continue;
+    }
+
+    if (token.name === 'odd') {
+      chainParts.push('.filter((index) => index % 2 === 1)');
+      continue;
+    }
+
+    const rawArg = (token.arg ?? '').trim();
+    if (!rawArg) {
+      return undefined;
+    }
+
+    const numericArg = toNumericIndex(rawArg);
+    if (token.name === 'eq') {
+      chainParts.push(`.eq(${rawArg})`);
+    } else if (token.name === 'gt') {
+      if (numericArg !== null) {
+        chainParts.push(`.slice(${numericArg + 1})`);
+      } else {
+        chainParts.push(`.filter((index) => index > (${rawArg}))`);
+      }
+    } else if (numericArg !== null) {
+      chainParts.push(`.slice(0, ${numericArg})`);
+    } else {
+      chainParts.push(`.filter((index) => index < (${rawArg}))`);
+    }
+  }
+
+  const baseBeforeDeprecatedPseudo = selector.slice(0, deprecatedTokens[0].start);
+  const shouldAppendUniversalSelector = /(?:\s|[>+~])$/.test(baseBeforeDeprecatedPseudo);
+
+  let cleanedSelector = selector;
+  for (let index = deprecatedTokens.length - 1; index >= 0; index -= 1) {
+    const token = deprecatedTokens[index];
+    cleanedSelector = `${cleanedSelector.slice(0, token.start)}${cleanedSelector.slice(token.end)}`;
+  }
+
+  cleanedSelector = cleanedSelector.replace(/\s{2,}/g, ' ').trim();
+  if (shouldAppendUniversalSelector && cleanedSelector) {
+    cleanedSelector = `${cleanedSelector} *`;
+  }
 
   return {
-    selector: cleanedSelector,
+    selector: cleanedSelector || '*',
     chain: chainParts.join(''),
   };
 }
 
-function rewriteDeprecatedSelectorUsage(line: string): string | undefined {
-  const callPattern = /(\$\s*\(\s*(['"`])([^'"`]*)\2\s*\)|\.find\s*\(\s*(['"`])([^'"`]*)\4\s*\))/;
-  const callMatch = line.match(callPattern);
-  if (!callMatch) {
+function replaceMatchedText(line: string, match: RegExpMatchArray, replacement: string): string {
+  if (typeof match.index !== 'number' || match.index < 0) {
+    return line.replace(match[0], replacement);
+  }
+
+  const start = match.index;
+  const end = start + match[0].length;
+  return `${line.slice(0, start)}${replacement}${line.slice(end)}`;
+}
+
+type SelectorCallKind = 'root' | 'filter' | 'is' | 'not' | 'selector-method' | 'event-selector';
+
+interface SelectorCallMatch {
+  kind: SelectorCallKind;
+  start: number;
+  end: number;
+  selectorStart: number;
+  selectorEnd: number;
+  selector: string;
+  quote: string;
+  callPrefix: string;
+  callSuffix: string;
+}
+
+function getSelectorRangeInCall(
+  fullCall: string,
+  quote: string,
+  selector: string,
+  callStart: number,
+): { selectorStart: number; selectorEnd: number } | undefined {
+  const selectorLiteral = `${quote}${selector}${quote}`;
+  const literalStart = fullCall.indexOf(selectorLiteral);
+  if (literalStart === -1) {
     return undefined;
   }
 
-  const fullCall = callMatch[1];
-  const selector = callMatch[3] ?? callMatch[5] ?? '';
-  const migration = buildSelectorMigration(selector);
-  if (!migration) {
+  const selectorStart = callStart + literalStart + 1;
+  return {
+    selectorStart,
+    selectorEnd: selectorStart + selector.length,
+  };
+}
+
+function buildSelectorCallExpression(call: SelectorCallMatch, selector: string): string {
+  return `${call.callPrefix}${selector}${call.callSuffix}`;
+}
+
+function splitTopLevelSelectorGroups(selector: string): string[] {
+  const groups: string[] = [];
+  let startIndex = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let quote: 'single' | 'double' | null = null;
+
+  for (let index = 0; index < selector.length; index += 1) {
+    const char = selector[index];
+    const previousChar = selector[index - 1];
+
+    if (quote) {
+      if (quote === 'single' && char === '\'' && previousChar !== '\\') {
+        quote = null;
+      } else if (quote === 'double' && char === '"' && previousChar !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '\'') {
+      quote = 'single';
+      continue;
+    }
+
+    if (char === '"') {
+      quote = 'double';
+      continue;
+    }
+
+    if (char === '[') {
+      bracketDepth += 1;
+      continue;
+    }
+
+    if (char === ']' && bracketDepth > 0) {
+      bracketDepth -= 1;
+      continue;
+    }
+
+    if (char === '(' && bracketDepth === 0) {
+      parenDepth += 1;
+      continue;
+    }
+
+    if (char === ')' && bracketDepth === 0 && parenDepth > 0) {
+      parenDepth -= 1;
+      continue;
+    }
+
+    if (char === ',' && bracketDepth === 0 && parenDepth === 0) {
+      groups.push(selector.slice(startIndex, index).trim());
+      startIndex = index + 1;
+    }
+  }
+
+  groups.push(selector.slice(startIndex).trim());
+  return groups.filter((group) => group.length > 0);
+}
+
+function collectSelectorCalls(line: string): SelectorCallMatch[] {
+  const calls: SelectorCallMatch[] = [];
+  const callPattern = /(?:\$jq|jQuery|JQuery|\$)\s*\(\s*(['"`])([^'"`]*)\1\s*\)|\.(find|filter|is|not|children|parents|closest|siblings|next|nextAll|nextUntil|prev|prevAll|prevUntil|has|add)\s*\(\s*(['"`])([^'"`]*)\4\s*\)|\.(?:on|one|off)\s*\(\s*(['"`])([^'"`]*)\6\s*,\s*(['"`])([^'"`]*)\8\s*(?:,|\))/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = callPattern.exec(line)) !== null) {
+    const fullCall = match[0];
+    const callStart = match.index;
+    const callEnd = callStart + fullCall.length;
+    const method = match[3];
+    const isEventSelector = Boolean(match[6]);
+    const quote = isEventSelector ? match[8] : (match[1] ?? match[4]);
+    const selector = isEventSelector ? (match[9] ?? '') : (match[2] ?? match[5] ?? '');
+
+    if (!quote) {
+      continue;
+    }
+
+    const selectorRange = getSelectorRangeInCall(fullCall, quote, selector, callStart);
+    if (!selectorRange) {
+      continue;
+    }
+
+    const selectorLocalStart = selectorRange.selectorStart - callStart;
+    const selectorLocalEnd = selectorRange.selectorEnd - callStart;
+
+    calls.push({
+      kind: isEventSelector
+        ? 'event-selector'
+        : (method === 'filter' || method === 'is' || method === 'not'
+            ? method
+            : (method ? 'selector-method' : 'root')),
+      start: callStart,
+      end: callEnd,
+      selectorStart: selectorRange.selectorStart,
+      selectorEnd: selectorRange.selectorEnd,
+      selector,
+      quote,
+      callPrefix: fullCall.slice(0, selectorLocalStart),
+      callSuffix: fullCall.slice(selectorLocalEnd),
+    });
+  }
+
+  return calls;
+}
+
+function rewriteSelectorCallWithChain(
+  line: string,
+  call: SelectorCallMatch,
+  migration: { selector: string; chain: string },
+): string {
+  const updatedCall = buildSelectorCallExpression(call, migration.selector);
+  return `${line.slice(0, call.start)}${updatedCall}${migration.chain}${line.slice(call.end)}`;
+}
+
+function rewriteRootSelectorGroupsCall(line: string, call: SelectorCallMatch): string | undefined {
+  if (call.kind !== 'root' || !hasTopLevelComma(call.selector)) {
     return undefined;
   }
 
-  const updatedCall = fullCall.replace(selector, migration.selector);
-  return line.replace(fullCall, `${updatedCall}${migration.chain}`);
+  const selectorGroups = splitTopLevelSelectorGroups(call.selector);
+  if (selectorGroups.length < 2) {
+    return undefined;
+  }
+
+  const groupExpressions = selectorGroups.map((group) => {
+    const migration = buildSelectorMigration(group);
+    const selectorCall = buildSelectorCallExpression(call, migration ? migration.selector : group);
+    return migration ? `${selectorCall}${migration.chain}` : selectorCall;
+  });
+
+  if (groupExpressions.length === 0) {
+    return undefined;
+  }
+
+  const combinedExpression = `${groupExpressions[0]}${groupExpressions.slice(1).map((groupExpression) => `.add(${groupExpression})`).join('')}`;
+  return `${line.slice(0, call.start)}${combinedExpression}${line.slice(call.end)}`;
+}
+
+function rewriteRootNotPseudoSelectorCall(line: string, call: SelectorCallMatch): string | undefined {
+  if (call.kind !== 'root') {
+    return undefined;
+  }
+
+  const notPseudoMatch = call.selector.match(/^(.*):not\(\s*(:(?:eq|gt|lt)\s*\([^)]*\)|:(?:first|last|even|odd))\s*\)\s*$/);
+  if (!notPseudoMatch) {
+    return undefined;
+  }
+
+  const baseSelector = notPseudoMatch[1].trim() || '*';
+  const notMigration = buildNotSelectorMigration(notPseudoMatch[2]);
+  if (!notMigration) {
+    return undefined;
+  }
+
+  const baseCall = buildSelectorCallExpression(call, baseSelector);
+  const rewrittenCall = `${baseCall}${notMigration}`;
+  return `${line.slice(0, call.start)}${rewrittenCall}${line.slice(call.end)}`;
+}
+
+function rewriteFilterSelectorCall(
+  line: string,
+  call: SelectorCallMatch,
+  migration: { selector: string; chain: string },
+): string {
+  const replacement = migration.selector === '*'
+    ? migration.chain
+    : `.filter(${call.quote}${migration.selector}${call.quote})${migration.chain}`;
+
+  return `${line.slice(0, call.start)}${replacement}${line.slice(call.end)}`;
+}
+
+function rewriteIsSelectorCall(
+  line: string,
+  call: SelectorCallMatch,
+  migration: { selector: string; chain: string },
+): string {
+  const baseFilter = migration.selector === '*'
+    ? ''
+    : `.filter(${call.quote}${migration.selector}${call.quote})`;
+  const replacement = `${baseFilter}${migration.chain}.length > 0`;
+
+  return `${line.slice(0, call.start)}${replacement}${line.slice(call.end)}`;
+}
+
+function buildNotSelectorMigration(selector: string): string | undefined {
+  const trimmed = selector.trim();
+  const shorthand = trimmed.match(/^:(first|last|even|odd)$/);
+  if (shorthand) {
+    const token = shorthand[1];
+    if (token === 'first') {
+      return '.slice(1)';
+    }
+
+    if (token === 'last') {
+      return '.slice(0, -1)';
+    }
+
+    if (token === 'even') {
+      return '.filter((index) => index % 2 === 1)';
+    }
+
+    return '.filter((index) => index % 2 === 0)';
+  }
+
+  const numericPseudo = trimmed.match(/^:(eq|gt|lt)\s*\(([^)]+)\)$/);
+  if (!numericPseudo) {
+    return undefined;
+  }
+
+  const method = numericPseudo[1];
+  const rawArg = numericPseudo[2].trim();
+  const numericArg = toNumericIndex(rawArg);
+
+  if (method === 'eq') {
+    return `.filter((index) => index !== (${rawArg}))`;
+  }
+
+  if (method === 'gt') {
+    if (numericArg !== null) {
+      return `.slice(0, ${numericArg + 1})`;
+    }
+
+    return `.filter((index) => index <= (${rawArg}))`;
+  }
+
+  if (numericArg !== null) {
+    return `.slice(${numericArg})`;
+  }
+
+  return `.filter((index) => index >= (${rawArg}))`;
+}
+
+function buildNotSelectorPredicate(selector: string, quote: string): string | undefined {
+  const trimmed = selector.trim();
+  const pseudoMatch = trimmed.match(/^(.*?)(:(eq|gt|lt)\s*\(([^)]+)\)|:(first|last|even|odd))$/);
+  if (!pseudoMatch) {
+    return undefined;
+  }
+
+  const rawSelectorPrefix = pseudoMatch[1].trim();
+  const method = pseudoMatch[3] ?? pseudoMatch[5];
+  const rawArg = pseudoMatch[4]?.trim();
+  let indexPredicate: string | undefined;
+
+  if (method === 'first') {
+    indexPredicate = 'index === 0';
+  } else if (method === 'last') {
+    return undefined;
+  } else if (method === 'even') {
+    indexPredicate = 'index % 2 === 0';
+  } else if (method === 'odd') {
+    indexPredicate = 'index % 2 === 1';
+  } else if (method === 'eq' && rawArg) {
+    indexPredicate = `index === (${rawArg})`;
+  } else if (method === 'gt' && rawArg) {
+    indexPredicate = `index > (${rawArg})`;
+  } else if (method === 'lt' && rawArg) {
+    indexPredicate = `index < (${rawArg})`;
+  }
+
+  if (!indexPredicate) {
+    return undefined;
+  }
+
+  if (!rawSelectorPrefix) {
+    return indexPredicate;
+  }
+
+  return `$(element).is(${quote}${rawSelectorPrefix}${quote}) && ${indexPredicate}`;
+}
+
+function rewriteNotSelectorCall(
+  line: string,
+  call: SelectorCallMatch,
+): string | undefined {
+  const replacement = buildNotSelectorMigration(call.selector);
+  if (replacement) {
+    return `${line.slice(0, call.start)}${replacement}${line.slice(call.end)}`;
+  }
+
+  const predicate = buildNotSelectorPredicate(call.selector, call.quote);
+  if (!predicate) {
+    return undefined;
+  }
+
+  return `${line.slice(0, call.start)}.not((index, element) => ${predicate})${line.slice(call.end)}`;
+}
+
+function buildDeprecatedPseudoCssFallback(token: string): string {
+  const trimmedToken = token.trim();
+
+  if (trimmedToken === ':first') {
+    return ':first-child';
+  }
+
+  if (trimmedToken === ':last') {
+    return ':last-child';
+  }
+
+  if (trimmedToken === ':even') {
+    return ':nth-child(odd)';
+  }
+
+  if (trimmedToken === ':odd') {
+    return ':nth-child(even)';
+  }
+
+  const numericMatch = trimmedToken.match(/^:(eq|gt|lt)\s*\(([^)]*)\)$/);
+  if (!numericMatch) {
+    return ':nth-child(1)';
+  }
+
+  const method = numericMatch[1];
+  const rawArg = numericMatch[2].trim();
+  const numericArg = toNumericIndex(rawArg);
+
+  if (numericArg === null) {
+    return ':nth-child(1)';
+  }
+
+  if (method === 'eq') {
+    if (numericArg >= 0) {
+      return `:nth-child(${numericArg + 1})`;
+    }
+
+    return `:nth-last-child(${Math.abs(numericArg)})`;
+  }
+
+  if (method === 'gt') {
+    if (numericArg < 0) {
+      return ':nth-child(n)';
+    }
+
+    return `:nth-child(n+${numericArg + 2})`;
+  }
+
+  if (numericArg <= 0) {
+    return ':not(*)';
+  }
+
+  return `:nth-child(-n+${numericArg})`;
+}
+
+function rewriteDeprecatedSelectorUsage(line: string, match: RegExpMatchArray): string | undefined {
+  const fallbackReplacement = buildDeprecatedPseudoCssFallback(match[0]);
+
+  const matchIndex = typeof match.index === 'number' ? match.index : -1;
+  if (matchIndex < 0) {
+    return replaceMatchedText(line, match, fallbackReplacement);
+  }
+
+  const selectorCall = collectSelectorCalls(line).find(
+    (candidate) => matchIndex >= candidate.selectorStart && matchIndex < candidate.selectorEnd,
+  );
+
+  if (!selectorCall) {
+    return replaceMatchedText(line, match, fallbackReplacement);
+  }
+
+  const rootGroupRewrite = rewriteRootSelectorGroupsCall(line, selectorCall);
+  if (rootGroupRewrite) {
+    return rootGroupRewrite;
+  }
+
+  const rootNotRewrite = rewriteRootNotPseudoSelectorCall(line, selectorCall);
+  if (rootNotRewrite) {
+    return rootNotRewrite;
+  }
+
+  const migration = buildSelectorMigration(selectorCall.selector);
+  const migrationCandidate = migration
+    ?? (selectorCall.kind === 'root' ? buildSelectorMigration(selectorCall.selector, { allowNonTrailing: true }) : undefined);
+
+  if (!migrationCandidate) {
+    return replaceMatchedText(line, match, fallbackReplacement);
+  }
+
+  if (selectorCall.kind === 'filter') {
+    return rewriteFilterSelectorCall(line, selectorCall, migrationCandidate);
+  }
+
+  if (selectorCall.kind === 'is') {
+    return rewriteIsSelectorCall(line, selectorCall, migrationCandidate);
+  }
+
+  if (selectorCall.kind === 'not') {
+    return rewriteNotSelectorCall(line, selectorCall) ?? replaceMatchedText(line, match, fallbackReplacement);
+  }
+
+  if (selectorCall.kind === 'event-selector') {
+    return replaceMatchedText(line, match, fallbackReplacement);
+  }
+
+  return rewriteSelectorCallWithChain(line, selectorCall, migrationCandidate);
 }
 
 function extractSelectorLiteral(expression: string): string | undefined {
@@ -162,7 +815,7 @@ function buildLiveDelegateReplacement(line: string, match: RegExpMatchArray, met
   const originalTarget = (match[2] ?? '').trim();
   const selectorLiteral = extractSelectorLiteral(originalTarget) ?? '/* selector */';
   const eventName = match[3] ?? '';
-  return line.replace(match[0], `${indentation}$(document).${method}(${eventName}, ${selectorLiteral}, `);
+  return replaceMatchedText(line, match, `${indentation}$(document).${method}(${eventName}, ${selectorLiteral}, `);
 }
 
 function rewriteHoverCall(line: string): string | undefined {
@@ -177,6 +830,58 @@ function rewriteHoverCall(line: string): string | undefined {
   }
 
   return undefined;
+}
+
+function rewriteBrowserDetectionUsage(line: string, match: RegExpMatchArray): string {
+  const browserToken = match[0].slice('$.browser'.length).replace(/^\./, '');
+
+  if (browserToken === 'msie') {
+    return replaceMatchedText(line, match, 'document.documentMode !== undefined');
+  }
+
+  if (browserToken === 'mozilla') {
+    return replaceMatchedText(line, match, `'InstallTrigger' in window`);
+  }
+
+  if (browserToken === 'webkit') {
+    return replaceMatchedText(line, match, `'WebkitAppearance' in document.documentElement.style`);
+  }
+
+  if (browserToken === 'opera') {
+    return replaceMatchedText(line, match, `('opr' in window || 'opera' in window)`);
+  }
+
+  if (browserToken === 'safari') {
+    return replaceMatchedText(line, match, '/^((?!chrome|android).)*safari/i.test(navigator.userAgent)');
+  }
+
+  return replaceMatchedText(line, match, 'navigator.userAgent');
+}
+
+function rewriteSupportDetectionUsage(line: string, match: RegExpMatchArray): string {
+  const token = match[0].slice('$.support'.length).replace(/^\./, '');
+
+  if (token === 'boxModel') {
+    return replaceMatchedText(line, match, `document.compatMode === 'CSS1Compat'`);
+  }
+
+  if (token === 'opacity') {
+    return replaceMatchedText(line, match, `window.CSS?.supports?.('opacity', '0.5') ?? true`);
+  }
+
+  return replaceMatchedText(line, match, `window.CSS?.supports?.('display', 'block') ?? true`);
+}
+
+function rewriteFindTokenizeUsage(line: string, match: RegExpMatchArray): string {
+  return replaceMatchedText(line, match, 'jQuery.find.tokenize.bind(jQuery.find)');
+}
+
+function appendUniqueSortAfterTraversalCall(line: string, match: RegExpMatchArray): string | undefined {
+  if (match[0].includes('.uniqueSort(')) {
+    return undefined;
+  }
+
+  return replaceMatchedText(line, match, `${match[0]}.uniqueSort()`);
 }
 
 const shorthandEvents = [
@@ -310,7 +1015,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.toggle\s*\(\s*function/g,
     note: 'Reescriba con estado explicito y .on("click", handler). No existe reemplazo 1:1 seguro.',
-    deriveSuggestedLine: (line) => line.replace(/\.toggle\s*\(/g, '.on("click", '),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '.on("click", function'),
     requiresContext: true,
   }),
   noteRule({
@@ -324,6 +1029,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.sub\s*\(\s*\)/g,
     note: 'Revisar el patron de extension de jQuery. No hay autofix seguro.',
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, 'jQuery'),
     requiresContext: true,
   }),
   noteRule({
@@ -337,6 +1043,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.selector\b/g,
     note: 'Elimine la dependencia de .selector; ya no representa de forma fiable la consulta original.',
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '.get(0)'),
   }),
   noteRule({
     id: 'jquery-context-property-removed',
@@ -349,6 +1056,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.context\b/g,
     note: 'Reemplace el acceso a .context por una referencia explicita al nodo o documento.',
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '.get(0)?.ownerDocument ?? document'),
   }),
   noteRule({
     id: 'jquery-deferred-state-removed',
@@ -361,7 +1069,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.(isRejected|isResolved)\s*\(\s*\)/g,
     note: 'Reestructure el flujo asyncrono con promesas/handlers explicitos.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `.state() === "${match[1] === 'isRejected' ? 'rejected' : 'resolved'}"`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `.state() === "${match[1] === 'isRejected' ? 'rejected' : 'resolved'}"`),
     requiresContext: true,
   }),
   noteRule({
@@ -375,6 +1083,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.browser\b(?:\.[A-Za-z_$][\w$]*)?/g,
     note: 'Reemplace la deteccion por capacidades del navegador o APIs nativas.',
+    deriveSuggestedLine: (line, match) => rewriteBrowserDetectionUsage(line, match),
   }),
   noteRule({
     id: 'jquery-boxmodel-removed',
@@ -387,6 +1096,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.boxModel\b/g,
     note: 'Elimine esa dependencia; el soporte historico de box model ya no aplica.',
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `document.compatMode === 'CSS1Compat'`),
   }),
   noteRule({
     id: 'jquery-support-removed',
@@ -399,6 +1109,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.support\b(?:\.[A-Za-z_$][\w$]*)?/g,
     note: 'Use feature detection moderna o una comprobacion explicita del API requerido.',
+    deriveSuggestedLine: (line, match) => rewriteSupportDetectionUsage(line, match),
   }),
   {
     id: 'jquery-ready-deprecated',
@@ -411,7 +1122,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'contextual',
     pattern: /^(\s*)(?:\$\s*\(\s*document\s*\)|\$\s*\(\s*[^)]*\s*\)|\$\s*\(\s*\s*\))\.ready\s*\(\s*/g,
     buildSuggestion: (line, match) => ({
-      suggestedLine: line.replace(match[0], `${match[1]}$(`),
+      suggestedLine: replaceMatchedText(line, match, `${match[1]}$(`),
       syntaxMode: 'fragment',
       confidence: 'medium',
       requiresContext: true,
@@ -520,7 +1231,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.unload\s*\(/g,
     note: 'Reemplace por window.onunload o addEventListener segun el caso.',
-    deriveSuggestedLine: (line) => line.replace(/\.unload\s*\(/g, '.on("unload", '),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '.on("unload", '),
     requiresContext: true,
   }),
   replaceRule({
@@ -560,6 +1271,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.fx\.interval\b/g,
     note: 'Elimine la dependencia; requestAnimationFrame cambia este comportamiento.',
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '16'),
   }),
   noteRule({
     id: 'jquery-toggleclass-deprecated',
@@ -574,14 +1286,14 @@ export const migrationRules: MigrationRule[] = [
     note: 'Use addClass/removeClass con una condicion explicita.',
     deriveSuggestedLine: (line, match) => {
       if (/\.toggleClass\s*\(\s*true\s*\)/.test(match[0])) {
-        return line.replace(match[0], '.addClass(/* className */)');
+        return replaceMatchedText(line, match, '.addClass(/* className */)');
       }
 
       if (/\.toggleClass\s*\(\s*false\s*\)/.test(match[0])) {
-        return line.replace(match[0], '.removeClass(/* className */)');
+        return replaceMatchedText(line, match, '.removeClass(/* className */)');
       }
 
-      return line.replace(match[0], '.toggleClass(/* className */)');
+      return replaceMatchedText(line, match, '.toggleClass(/* className */)');
     },
   }),
   replaceRule({
@@ -608,7 +1320,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.holdReady\s*\(/g,
     note: 'Reestructure el orden de carga en vez de bloquear el ready global.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], 'document.addEventListener("DOMContentLoaded", '),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, 'document.addEventListener("DOMContentLoaded", '),
     requiresContext: true,
   }),
   replaceRule({
@@ -635,7 +1347,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.isNumeric\s*\(\s*([^)]+)\s*\)/g,
     note: 'Sustituya por una validacion especifica para su dominio; no existe reemplazo universal seguro.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `Number.isFinite(Number(${match[1]}))`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `Number.isFinite(Number(${match[1]}))`),
     syntaxMode: 'expression',
     requiresContext: true,
   }),
@@ -650,7 +1362,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.isWindow\s*\(\s*([^)]+)\s*\)/g,
     note: 'Si realmente hace falta, use obj != null && obj === obj.window.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `${match[1]} != null && ${match[1]} === ${match[1]}.window`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `${match[1]} != null && ${match[1]} === ${match[1]}.window`),
     syntaxMode: 'expression',
   }),
   noteRule({
@@ -664,7 +1376,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.type\s*\(\s*([^)]+)\s*\)/g,
     note: 'Sustituya por typeof, Array.isArray, instanceof u otra comprobacion especifica.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `typeof ${match[1]}`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `typeof ${match[1]}`),
     syntaxMode: 'expression',
   }),
   replaceRule({
@@ -691,7 +1403,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.proxy\s*\(\s*([^,]+)\s*,\s*([^,)]+)([^)]*)\)/g,
     note: 'Revise si puede reemplazarse por fn.bind(context). En handlers puede cambiar la identidad de la funcion.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `${match[1].trim()}.bind(${match[2].trim()})`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `${match[1].trim()}.bind(${match[2].trim()})`),
     requiresContext: true,
   }),
   noteRule({
@@ -705,11 +1417,11 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.hover\s*\(/g,
     note: 'Reemplace por .on("mouseenter", enterHandler).on("mouseleave", leaveHandler).',
-    deriveSuggestedLine: (line) => rewriteHoverCall(line) ?? line.replace(/\.hover\s*\(/g, '.on("mouseenter", '),
+    deriveSuggestedLine: (line, match) => rewriteHoverCall(line) ?? replaceMatchedText(line, match, '.on("mouseenter", '),
     requiresContext: true,
   }),
   ...shorthandHandlerRules,
-  noteRule({
+  {
     id: 'jquery-selector-extensions-deprecated',
     name: 'jQuery extension selectors deprecated',
     description: 'Los selectores :eq/:gt/:lt/:first/:last/:even/:odd fueron depreciados.',
@@ -717,12 +1429,15 @@ export const migrationRules: MigrationRule[] = [
     sourceType: 'api-deprecated',
     sourceUrl: 'https://api.jquery.com/category/deprecated/deprecated-3.4/',
     sinceVersion: '3.4',
-    fixType: 'manual',
-    pattern: /:(eq|gt|lt)\s*\([^)]*\)|:(first|last|even|odd)\b/g,
-    note: 'Mueva el filtrado fuera del selector: use .eq(), .slice(), .first(), .last() o .filter().',
-    deriveSuggestedLine: (line) => rewriteDeprecatedSelectorUsage(line),
-    syntaxMode: 'expression',
-  }),
+    fixType: 'contextual',
+    pattern: /:(eq|gt|lt)\s*\([^)]*\)|:(first|last|even|odd)(?![-\w])/g,
+    buildSuggestion: (line, match) => ({
+      suggestedLine: rewriteDeprecatedSelectorUsage(line, match),
+      syntaxMode: 'expression',
+      confidence: 'medium',
+      requiresContext: true,
+    }),
+  },
   replaceRule({
     id: 'jquery-trim-deprecated',
     name: 'jQuery.trim deprecated',
@@ -747,7 +1462,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'contextual',
     pattern: /(.*?)\.ajax(Start|Stop|Send|Complete|Error|Success)\s*\(\s*/g,
     buildSuggestion: (line, match) => ({
-      suggestedLine: line.replace(match[0], `$(document).on("ajax${match[2]}", `),
+      suggestedLine: replaceMatchedText(line, match, `$(document).on("ajax${match[2]}", `),
       syntaxMode: 'fragment',
       confidence: 'medium',
       requiresContext: true,
@@ -827,7 +1542,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\s*\((?!\s*document\s*\))[^)]*\)\.on\s*\(\s*['"`]ajax(Start|Stop|Send|Complete|Error|Success)['"`]/g,
     note: 'Cambie el origen del handler a $(document).on("ajax...", handler).',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `$(document).on("ajax${match[1]}"`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `$(document).on("ajax${match[1]}"`),
     requiresContext: true,
   }),
   noteRule({
@@ -841,7 +1556,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.removeAttr\s*\(\s*['"`](checked|selected|readonly|disabled|multiple)['"`]\s*\)/g,
     note: 'Revise si debe usar .prop(name, false) en vez de .removeAttr(name).',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `.prop("${match[1]}", false)`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `.prop("${match[1]}", false)`),
     requiresContext: true,
   }),
   noteRule({
@@ -855,7 +1570,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.param\s*\(\s*([^)]+)\s*\)/g,
     note: 'Revise si el backend depende de + en lugar de %20. Considere URLSearchParams segun el caso.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], `new URLSearchParams(${match[1]}).toString()`),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `new URLSearchParams(${match[1]}).toString()`),
     requiresContext: true,
   }),
   replaceRule({
@@ -882,7 +1597,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\s*\(\s*['"`]#['"`]\s*\)|\.find\s*\(\s*['"`]#['"`]\s*\)/g,
     note: 'Corrija el selector antes de migrar; jQuery 3+ lanza error de sintaxis.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], '/* selector corregido */'),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '/* selector corregido */'),
   }),
   noteRule({
     id: 'jquery-hover-pseudo-event-breaking',
@@ -895,7 +1610,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /['"`]hover['"`]/g,
     note: 'Verifique si es un custom event legitimo o un uso historico del pseudo-evento hover.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], '"mouseenter mouseleave"'),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '"mouseenter mouseleave"'),
     confidence: 'low',
     requiresContext: true,
   }),
@@ -910,7 +1625,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\.data\s*\(\s*['"`]events['"`]\s*\)/g,
     note: 'No existe API publica equivalente; reescriba la logica.',
-    deriveSuggestedLine: (line, match) => line.replace(match[0], '.data()'),
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, '.data()'),
   }),
   noteRule({
     id: 'jquery-htmlprefilter-breaking',
@@ -923,7 +1638,13 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /jQuery\.htmlPrefilter|\$\.htmlPrefilter|['"`][^'"`]*<(div|span|p|li|td|tr|script|section|article)(\s[^'"`]*)?\/>([^'"`]*)['"`]/g,
     note: 'Reemplace tags autocerrados no vacios por apertura+cierre explicitos.',
-    deriveSuggestedLine: (line) => line.replace(/<([a-z][^\s/>]*)([^>]*)\/>/gi, '<$1$2></$1>'),
+    deriveSuggestedLine: (line, match) => {
+      if (/jQuery\.htmlPrefilter|\$\.htmlPrefilter/.test(match[0])) {
+        return replaceMatchedText(line, match, '(html) => html');
+      }
+
+      return line.replace(/<([a-z][^\s/>]*)([^>]*)\/>/gi, '<$1$2></$1>');
+    },
     syntaxMode: 'html',
     requiresContext: true,
   }),
@@ -938,6 +1659,7 @@ export const migrationRules: MigrationRule[] = [
     fixType: 'manual',
     pattern: /\$\.find\.tokenize|jQuery\.find\.tokenize/g,
     note: 'Si el codigo se probo con 3.7.0, valide el comportamiento con 3.7.1.',
+    deriveSuggestedLine: (line, match) => rewriteFindTokenizeUsage(line, match),
   }),
   noteRule({
     id: 'jquery-uniqueSort-chainable-release',
@@ -948,8 +1670,9 @@ export const migrationRules: MigrationRule[] = [
     sourceUrl: RELEASE_370,
     sinceVersion: '3.7.0',
     fixType: 'manual',
-    pattern: /\.prev(All|Until|Until)|\.next(All|Until|Until)/g,
+    pattern: /\.(?:prev(?:All|Until)?|next(?:All|Until)?)\s*\([^)]*\)/g,
     note: 'Si despues encadena wrapAll/manipulacion y necesita orden DOM, revise si conviene .uniqueSort().',
+    deriveSuggestedLine: (line, match) => appendUniqueSortAfterTraversalCall(line, match),
     confidence: 'low',
     requiresContext: true,
   }),

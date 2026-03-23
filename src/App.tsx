@@ -116,7 +116,7 @@ function IssueCard({
           </div>
         ) : (
           <div className="migrated-code syntax-note">
-            <strong>Sin linea propuesta:</strong> {issue.note ?? 'No hay correccion automatica segura para este caso.'}
+            {issue.note ?? 'Aplicar migracion manual segun la fuente oficial de la regla.'}
           </div>
         )}
       </div>
