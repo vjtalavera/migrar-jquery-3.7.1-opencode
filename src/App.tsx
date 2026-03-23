@@ -242,13 +242,18 @@ function App() {
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [showExplanatoryText, setShowExplanatoryText] = useState(true);
   const [folderFiles, setFolderFiles] = useState<FolderFileEntry[]>([]);
+  const [fileSearch, setFileSearch] = useState('');
   const [skippedFilesCount, setSkippedFilesCount] = useState(0);
   const [routeInput, setRouteInput] = useState('');
   const [routeHint, setRouteHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const analyzedFiles = folderFiles.filter((file) => file.isAnalyzed);
-  const pendingFiles = folderFiles.length - analyzedFiles.length;
+  const normalizedFileSearch = fileSearch.trim().toLowerCase();
+  const visibleFolderFiles = normalizedFileSearch
+    ? folderFiles.filter((entry) => entry.filePath.toLowerCase().includes(normalizedFileSearch))
+    : folderFiles;
+  const analyzedFiles = visibleFolderFiles.filter((file) => file.isAnalyzed);
+  const pendingFiles = visibleFolderFiles.length - analyzedFiles.length;
   const filesWithIssues = analyzedFiles.filter((file) => (file.recursiveAnalysis?.totalIssues ?? 0) > 0).length;
   const totalIssues = analyzedFiles.reduce((total, file) => total + (file.recursiveAnalysis?.totalIssues ?? 0), 0);
   const analyzedSummary = analyzedFiles.reduce((summary, file) => {
@@ -276,6 +281,7 @@ function App() {
 
   const handleAnalyze = () => {
     setFolderFiles([]);
+    setFileSearch('');
     setSkippedFilesCount(0);
     setResult(analyzeCode(code, targetVersion));
   };
@@ -284,6 +290,7 @@ function App() {
     setCode(sampleCode);
     setResult(null);
     setFolderFiles([]);
+    setFileSearch('');
     setSkippedFilesCount(0);
     setRouteInput('');
     setRouteHint(null);
@@ -341,6 +348,7 @@ function App() {
 
       const filteredEntries = filterEntriesByRoutes(entries, routePaths);
       setFolderFiles(filteredEntries);
+      setFileSearch('');
       setSkippedFilesCount(0);
       setRouteHint(`${filteredEntries.length} archivo(s) cargado(s) por rutas. Selecciona un archivo para analizar.`);
     } catch (error: unknown) {
@@ -352,6 +360,7 @@ function App() {
   const handleTargetVersionChange = (version: TargetJQueryVersion) => {
     setTargetVersion(version);
     setResult(null);
+    setFileSearch('');
     setFolderFiles((current) => current.map((entry) => ({
       ...entry,
       isAnalyzing: false,
@@ -391,6 +400,7 @@ function App() {
       }));
 
     setFolderFiles(entries);
+    setFileSearch('');
 
     setSkippedFilesCount(selectedFiles.length - allowedFiles.length);
     event.target.value = '';
@@ -579,7 +589,7 @@ function App() {
               onChange={handleFileChange}
               style={{ display: 'none' }}
             />
-            <div className="folder-select">
+            <div className={`folder-select ${mode === 'folder' ? 'folder-select-inline' : ''}`}>
               {mode === 'folder' && (
                 <button onClick={handleSelectFolder}>
                   Seleccionar carpeta
@@ -643,6 +653,7 @@ function App() {
           <div className="folder-stats">
             <div className="stat">Version objetivo: <strong>{targetVersion}</strong></div>
             <div className="stat">Archivos detectados: <strong>{folderFiles.length}</strong></div>
+            <div className="stat">Mostrando: <strong>{visibleFolderFiles.length}</strong></div>
             <div className="stat">Pendientes: <strong>{pendingFiles}</strong></div>
             <div className="stat">Analizados: <strong>{analyzedFiles.length}</strong></div>
             <div className="stat">Con hallazgos: <strong>{filesWithIssues}</strong></div>
@@ -652,80 +663,107 @@ function App() {
             <div className="stat">Manual: <strong>{analyzedSummary.manualReviews}</strong></div>
           </div>
 
-          {folderFiles.map((fileEntry) => (
-            <section key={fileEntry.id} className={`file-result ${fileEntry.isAnalyzed ? 'analyzed' : 'pending'}`}>
-              <button
-                type="button"
-                className="file-header file-toggle"
-                onClick={() => handleToggleFile(fileEntry.id)}
-                disabled={fileEntry.isAnalyzing}
-              >
-                <span className="file-path">{fileEntry.filePath}</span>
-                <span className="file-stats">
-                  <span className={`status-pill ${fileEntry.isAnalyzed ? 'done' : 'pending'}`}>
-                    {fileEntry.isAnalyzing ? 'Analizando...' : fileEntry.isAnalyzed ? 'Analizado' : 'Sin analizar'}
-                  </span>
-                  {fileEntry.isAnalyzed && (
-                    <>
-                      <span>{fileEntry.result?.issues.length ?? 0} incidencias</span>
-                      <span className="error-text">{fileEntry.result?.summary.errors ?? 0} errores</span>
-                      <span className="warning-text">{fileEntry.result?.summary.warnings ?? 0} warnings</span>
-                      <span className="info-text">{fileEntry.result?.summary.info ?? 0} info</span>
-                    </>
-                  )}
-                </span>
-              </button>
-
-              {fileEntry.error && <p className="validation-detail">{fileEntry.error}</p>}
-
-              {fileEntry.isExpanded && fileEntry.isAnalyzing && (
-                <div className="file-issues">
-                  <div className="no-issues">Analizando archivo...</div>
-                </div>
+          <div className="file-search-row">
+            <label htmlFor="file-search-input">Buscar archivo</label>
+            <div className="file-search-input-wrap">
+              <input
+                id="file-search-input"
+                type="search"
+                value={fileSearch}
+                onChange={(event) => setFileSearch(event.target.value)}
+                placeholder="Filtrar por ruta o nombre"
+                className="file-search-input"
+              />
+              {fileSearch && (
+                <button
+                  type="button"
+                  className="secondary file-search-clear"
+                  onClick={() => setFileSearch('')}
+                >
+                  Limpiar
+                </button>
               )}
+            </div>
+          </div>
 
-              {fileEntry.isExpanded && fileEntry.isAnalyzed && fileEntry.recursiveAnalysis && (
-                <div className="file-issues">
-                  <div className="recursive-columns">
-                    <div className="recursive-left">
-                      {fileEntry.result ? (
-                        <section className="included-result">
-                          {fileEntry.result.issues.length === 0 ? (
-                            <div className="no-issues">No se detectaron hallazgos en el archivo base.</div>
-                          ) : (
-                            fileEntry.result.issues.map((issue, index) => (
-                              <IssueCard
-                                key={`${fileEntry.id}-root-${issue.rule.id}-${index}`}
-                                issue={issue}
-                                onSelect={() => handleSelectIssueLine(fileEntry.id, issue.lineNumber)}
-                                isSelected={fileEntry.selectedIssueLine === issue.lineNumber}
-                                showExplanatoryText={showExplanatoryText}
-                              />
-                            ))
-                          )}
-
-                          {fileEntry.fileContent && fileEntry.selectedIssueLine && (
-                            <div className="file-preview">
-                              {getFilePreviewLines(fileEntry.fileContent).map((line) => (
-                                <div
-                                  key={`${fileEntry.id}-preview-${line.lineNumber}`}
-                                  id={buildPreviewLineId(fileEntry.id, line.lineNumber)}
-                                  className={`preview-line ${line.lineNumber === fileEntry.selectedIssueLine ? 'focus' : ''}`}
-                                >
-                                  <span className="preview-line-number">{line.lineNumber}</span>
-                                  <span className="preview-line-text">{line.text || ' '}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </section>
-                      ) : (
-                        <div className="no-issues">No se pudo obtener el resultado del archivo base.</div>
+          {visibleFolderFiles.length === 0 ? (
+            <div className="no-issues">No hay archivos que coincidan con la busqueda.</div>
+          ) : (
+            <div className="file-results-list">
+              {visibleFolderFiles.map((fileEntry) => (
+                <section key={fileEntry.id} className={`file-result ${fileEntry.isAnalyzed ? 'analyzed' : 'pending'}`}>
+                  <button
+                    type="button"
+                    className="file-header file-toggle"
+                    onClick={() => handleToggleFile(fileEntry.id)}
+                    disabled={fileEntry.isAnalyzing}
+                  >
+                    <span className="file-path">{fileEntry.filePath}</span>
+                    <span className="file-stats">
+                      <span className={`status-pill ${fileEntry.isAnalyzed ? 'done' : 'pending'}`}>
+                        {fileEntry.isAnalyzing ? 'Analizando...' : fileEntry.isAnalyzed ? 'Analizado' : 'Sin analizar'}
+                      </span>
+                      {fileEntry.isAnalyzed && (
+                        <>
+                          <span>{fileEntry.result?.issues.length ?? 0} incidencias</span>
+                          <span className="error-text">{fileEntry.result?.summary.errors ?? 0} errores</span>
+                          <span className="warning-text">{fileEntry.result?.summary.warnings ?? 0} warnings</span>
+                          <span className="info-text">{fileEntry.result?.summary.info ?? 0} info</span>
+                        </>
                       )}
-                    </div>
+                    </span>
+                  </button>
 
-                    <div className="recursive-right">
-                      {(() => {
+                  {fileEntry.error && <p className="validation-detail">{fileEntry.error}</p>}
+
+                  {fileEntry.isExpanded && fileEntry.isAnalyzing && (
+                    <div className="file-issues">
+                      <div className="no-issues">Analizando archivo...</div>
+                    </div>
+                  )}
+
+                  {fileEntry.isExpanded && fileEntry.isAnalyzed && fileEntry.recursiveAnalysis && (
+                    <div className="file-issues">
+                      <div className="recursive-columns">
+                        <div className="recursive-left">
+                          {fileEntry.result ? (
+                            <section className="included-result">
+                              {fileEntry.result.issues.length === 0 ? (
+                                <div className="no-issues">No se detectaron hallazgos en el archivo base.</div>
+                              ) : (
+                                fileEntry.result.issues.map((issue, index) => (
+                                  <IssueCard
+                                    key={`${fileEntry.id}-root-${issue.rule.id}-${index}`}
+                                    issue={issue}
+                                    onSelect={() => handleSelectIssueLine(fileEntry.id, issue.lineNumber)}
+                                    isSelected={fileEntry.selectedIssueLine === issue.lineNumber}
+                                    showExplanatoryText={showExplanatoryText}
+                                  />
+                                ))
+                              )}
+
+                              {fileEntry.fileContent && fileEntry.selectedIssueLine && (
+                                <div className="file-preview">
+                                  {getFilePreviewLines(fileEntry.fileContent).map((line) => (
+                                    <div
+                                      key={`${fileEntry.id}-preview-${line.lineNumber}`}
+                                      id={buildPreviewLineId(fileEntry.id, line.lineNumber)}
+                                      className={`preview-line ${line.lineNumber === fileEntry.selectedIssueLine ? 'focus' : ''}`}
+                                    >
+                                      <span className="preview-line-number">{line.lineNumber}</span>
+                                      <span className="preview-line-text">{line.text || ' '}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          ) : (
+                            <div className="no-issues">No se pudo obtener el resultado del archivo base.</div>
+                          )}
+                        </div>
+
+                        <div className="recursive-right">
+                          {(() => {
                         const recursiveEntries = fileEntry.recursiveAnalysis.entries
                           .filter((entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src');
 
@@ -797,8 +835,10 @@ function App() {
                   </div>
                 </div>
               )}
-            </section>
-          ))}
+                </section>
+              ))}
+            </div>
+          )}
         </section>
       )}
     </div>
