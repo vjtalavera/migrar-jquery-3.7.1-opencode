@@ -806,8 +806,12 @@ function rewriteDeprecatedSelectorUsage(line: string, match: RegExpMatchArray): 
 
 function extractSelectorLiteral(expression: string): string | undefined {
   const trimmed = expression.trim();
-  const selectorCall = trimmed.match(/^(?:\$|jQuery)\s*\(\s*(['"`][^'"`]+['"`])\s*\)$/);
-  return selectorCall?.[1];
+  const selectorCall = trimmed.match(/^(?:\$jq|\$|jQuery|JQuery)\s*\(\s*(['"`])((?:\\.|(?!\1).)*)\1\s*\)$/);
+  if (!selectorCall) {
+    return undefined;
+  }
+
+  return `${selectorCall[1]}${selectorCall[2]}${selectorCall[1]}`;
 }
 
 function buildLiveDelegateReplacement(line: string, match: RegExpMatchArray, method: 'on' | 'off'): string {
@@ -816,6 +820,39 @@ function buildLiveDelegateReplacement(line: string, match: RegExpMatchArray, met
   const selectorLiteral = extractSelectorLiteral(originalTarget) ?? '/* selector */';
   const eventName = match[3] ?? '';
   return replaceMatchedText(line, match, `${indentation}$(document).${method}(${eventName}, ${selectorLiteral}, `);
+}
+
+function inferDieNoArgsEvents(selectorLiteral: string): string {
+  const unquotedSelector = selectorLiteral.slice(1, -1).trim().toLowerCase();
+
+  if (/(^|\s|[>+~])(?:input|select|textarea)(?:\b|\[)/.test(unquotedSelector)) {
+    return 'change click';
+  }
+
+  if (/(^|\s|[>+~])form\b/.test(unquotedSelector)) {
+    return 'submit';
+  }
+
+  return 'click';
+}
+
+function buildDieWithoutArgsReplacement(line: string, match: RegExpMatchArray): string {
+  const indentation = match[1] ?? '';
+  const originalTarget = (match[2] ?? '').trim();
+  const selectorLiteral = extractSelectorLiteral(originalTarget) ?? '/* selector */';
+  const quote = selectorLiteral[0] === '"' || selectorLiteral[0] === '\'' || selectorLiteral[0] === '`'
+    ? selectorLiteral[0]
+    : '\'';
+  const inferredEvents = inferDieNoArgsEvents(selectorLiteral);
+  return replaceMatchedText(line, match, `${indentation}$(document).off(${quote}${inferredEvents}${quote}, ${selectorLiteral})`);
+}
+
+function buildDieOneArgReplacement(line: string, match: RegExpMatchArray): string {
+  const indentation = match[1] ?? '';
+  const originalTarget = (match[2] ?? '').trim();
+  const eventName = match[3] ?? '/* event */';
+  const selectorLiteral = extractSelectorLiteral(originalTarget) ?? '/* selector */';
+  return replaceMatchedText(line, match, `${indentation}$(document).off(${eventName}, ${selectorLiteral})`);
 }
 
 function rewriteHoverCall(line: string): string | undefined {
@@ -979,6 +1016,55 @@ export const migrationRules: MigrationRule[] = [
       requiresContext: true,
     }),
   },
+  {
+    id: 'jquery-die-single-event-removed',
+    name: '.die(event) removed',
+    description: '.die(event) fue eliminado y debe migrarse a $(document).off(event, selector).',
+    severity: 'error',
+    sourceType: 'api-removed',
+    sourceUrl: UPGRADE_19,
+    sinceVersion: '1.9',
+    fixType: 'contextual',
+    pattern: /^(\s*)(.+?)\.die\s*\(\s*(['"`][^'"`]+['"`])\s*\)/g,
+    buildSuggestion: (line, match) => ({
+      suggestedLine: buildDieOneArgReplacement(line, match),
+      syntaxMode: 'statement',
+      confidence: 'medium',
+      requiresContext: true,
+    }),
+  },
+  {
+    id: 'jquery-die-noargs-removed',
+    name: '.die() no-args removed',
+    description: '.die() fue eliminado y debe migrarse a $(document).off(event, selector).',
+    severity: 'error',
+    sourceType: 'api-removed',
+    sourceUrl: UPGRADE_19,
+    sinceVersion: '1.9',
+    fixType: 'contextual',
+    pattern: /^(\s*)(.+?)\.die\s*\(\s*\)/g,
+    buildSuggestion: (line, match) => ({
+      suggestedLine: buildDieWithoutArgsReplacement(line, match),
+      syntaxMode: 'statement',
+      confidence: 'low',
+      requiresContext: true,
+    }),
+  },
+  noteRule({
+    id: 'jquery-attr-boolean-property',
+    name: '.attr(boolean, value) should use .prop',
+    description: 'Para propiedades booleanas use .prop(name, value) en lugar de .attr(name, value).',
+    severity: 'warning',
+    sourceType: 'upgrade-guide',
+    sourceUrl: UPGRADE_19,
+    sinceVersion: '1.9',
+    fixType: 'contextual',
+    pattern: /\.attr\s*\(\s*['"`](checked|selected|readonly|disabled|multiple)['"`]\s*,\s*(true|false)\s*\)/g,
+    note: 'Use .prop(name, value) para reflejar estado booleano real del elemento.',
+    deriveSuggestedLine: (line, match) => replaceMatchedText(line, match, `.prop('${match[1]}', ${match[2]})`),
+    syntaxMode: 'statement',
+    confidence: 'high',
+  }),
   replaceRule({
     id: 'jquery-andself-removed',
     name: '.andSelf() removed',
