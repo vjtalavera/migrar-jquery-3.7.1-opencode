@@ -222,16 +222,24 @@ function getFileNameFromPath(filePath: string): string {
 }
 
 function getDefaultRecursiveEntryId(analysis: RecursiveFileAnalysis): string | null {
-  const firstRecursiveWithResult = analysis.entries.find(
-    (entry) => (entry.kind === 'jsp-include' || entry.kind === 'script-src') && entry.result,
-  );
+  const recursiveEntries = analysis.entries
+    .filter((entry) => (entry.kind === 'jsp-include' || entry.kind === 'script-src') && entry.depth === 1)
+    .sort((left, right) => {
+      const leftLine = left.referenceLine ?? Number.MAX_SAFE_INTEGER;
+      const rightLine = right.referenceLine ?? Number.MAX_SAFE_INTEGER;
+      if (leftLine !== rightLine) {
+        return leftLine - rightLine;
+      }
+
+      return left.displayPath.localeCompare(right.displayPath);
+    });
+
+  const firstRecursiveWithResult = recursiveEntries.find((entry) => entry.result);
   if (firstRecursiveWithResult) {
     return firstRecursiveWithResult.id;
   }
 
-  const firstRecursive = analysis.entries.find(
-    (entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src',
-  );
+  const firstRecursive = recursiveEntries[0];
   return firstRecursive?.id ?? null;
 }
 
@@ -764,76 +772,76 @@ function App() {
 
                         <div className="recursive-right">
                           {(() => {
-                        const recursiveEntries = fileEntry.recursiveAnalysis.entries
-                          .filter((entry) => entry.kind === 'jsp-include' || entry.kind === 'script-src');
+                            const recursiveEntries = fileEntry.recursiveAnalysis.entries
+                              .filter((entry) => (entry.kind === 'jsp-include' || entry.kind === 'script-src') && entry.depth === 1)
+                              .sort((left, right) => {
+                                const leftLine = left.referenceLine ?? Number.MAX_SAFE_INTEGER;
+                                const rightLine = right.referenceLine ?? Number.MAX_SAFE_INTEGER;
+                                if (leftLine !== rightLine) {
+                                  return leftLine - rightLine;
+                                }
 
-                        if (recursiveEntries.length === 0) {
-                          return <div className="no-issues">No se detectaron archivos recursivos.</div>;
-                        }
+                                return left.displayPath.localeCompare(right.displayPath);
+                              });
 
-                        return (
-                          <>
-                            <div className="dependency-layout">
-                              <p className="dependency-title">Layout recursivo de includes y scripts</p>
-                              {recursiveEntries.map((entry) => {
-                                const isSelected = entry.id === fileEntry.selectedRecursiveEntryId;
+                            if (recursiveEntries.length === 0) {
+                              return <div className="no-issues">No se detectaron archivos recursivos.</div>;
+                            }
 
-                                return (
-                                  <div key={`${fileEntry.id}-${entry.id}`}>
-                                    <button
-                                      type="button"
-                                      className={`dependency-item ${entry.found ? 'found' : 'missing'} ${isSelected ? 'selected' : ''}`}
-                                      style={{ paddingLeft: `${entry.depth * 1.1}rem` }}
-                                      onClick={() => handleSelectRecursiveEntry(fileEntry.id, entry.id)}
-                                    >
-                                      <span className="dependency-path">{entry.displayPath}</span>
-                                      {entry.referenceLine && <span className="dependency-count">linea {entry.referenceLine}</span>}
-                                      {entry.result && <span className="dependency-count">{entry.result.issues.length} incidencias</span>}
-                                      {!entry.found && <span className="dependency-count">no encontrado</span>}
-                                    </button>
+                            return (
+                              <>
+                                <div className="dependency-layout">
+                                  <p className="dependency-title">Layout recursivo de includes y scripts</p>
+                                  {recursiveEntries.map((entry) => {
+                                    const isSelected = entry.id === fileEntry.selectedRecursiveEntryId;
 
-                                    {isSelected && (
-                                      <div className="dependency-details" style={{ marginLeft: `${entry.depth * 1.1}rem` }}>
-                                        {!entry.result && (
-                                          <div className="no-issues">No se pudo analizar esta referencia.</div>
-                                        )}
+                                    return (
+                                      <div key={`${fileEntry.id}-${entry.id}`}>
+                                        <button
+                                          type="button"
+                                          className={`dependency-item ${entry.found ? 'found' : 'missing'} ${isSelected ? 'selected' : ''}`}
+                                          style={{ paddingLeft: `${entry.depth * 1.1}rem` }}
+                                          onClick={() => handleSelectRecursiveEntry(fileEntry.id, entry.id)}
+                                        >
+                                          <span className="dependency-source-line">
+                                            {(entry.referenceCodeLine ?? '').trim() || '(sin codigo detectado)'}
+                                          </span>
+                                          <span className="dependency-inline-meta">
+                                            {entry.result ? `${entry.result.issues.length} incidencias` : 'no encontrado'}
+                                          </span>
+                                        </button>
 
-                                        {entry.result && entry.result.issues.length === 0 && (
-                                          <div className="no-issues">No se detectaron hallazgos en este archivo recursivo.</div>
-                                        )}
+                                        {isSelected && (
+                                          <div className="dependency-details" style={{ marginLeft: `${entry.depth * 1.1}rem` }}>
+                                            {!entry.result && (
+                                              <div className="no-issues">No se pudo analizar esta referencia.</div>
+                                            )}
 
-                                        {entry.result && entry.result.issues.length > 0 && (
-                                          <>
-                                            <div className="included-header">
-                                              <span className="file-stats">
-                                                {entry.referenceLine && <span>linea {entry.referenceLine}</span>}
-                                                <span>{entry.result.issues.length} incidencias</span>
-                                                <span className="error-text">{entry.result.summary.errors} errores</span>
-                                                <span className="warning-text">{entry.result.summary.warnings} warnings</span>
-                                                <span className="info-text">{entry.result.summary.info} info</span>
-                                              </span>
-                                            </div>
-                                            {entry.result.issues.map((issue, index) => (
-                                              <IssueCard
-                                                key={`${entry.id}-${issue.rule.id}-${index}`}
-                                                issue={issue}
-                                                showExplanatoryText={showExplanatoryText}
-                                              />
-                                            ))}
-                                          </>
+                                            {entry.result && entry.result.issues.length === 0 && (
+                                              <div className="no-issues">No se detectaron incidencias en este archivo.</div>
+                                            )}
+
+                                            {entry.result && entry.result.issues.length > 0 && (
+                                              entry.result.issues.map((issue, index) => (
+                                                <IssueCard
+                                                  key={`${entry.id}-${issue.rule.id}-${index}`}
+                                                  issue={issue}
+                                                  showExplanatoryText={showExplanatoryText}
+                                                />
+                                              ))
+                                            )}
+                                          </div>
                                         )}
                                       </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </>
-                        );
-                      })()}
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
               )}
                 </section>
               ))}

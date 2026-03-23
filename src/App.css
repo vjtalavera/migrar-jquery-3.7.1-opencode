@@ -554,7 +554,7 @@ button.secondary:hover {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   border-left: 2px solid #c9d3e1;
   width: 100%;
   text-align: left;
@@ -565,6 +565,7 @@ button.secondary:hover {
   background: transparent;
   padding-top: 0.12rem;
   padding-bottom: 0.12rem;
+  overflow-x: auto;
 }
 
 .dependency-item.missing {
@@ -593,6 +594,24 @@ button.secondary:hover {
   font-size: 0.78rem;
   color: #3f495c;
   overflow-wrap: anywhere;
+}
+
+.dependency-source-line {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.7rem;
+  color: #6a7381;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dependency-inline-meta {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  color: #5b6678;
+  white-space: nowrap;
 }
 
 .included-result {
@@ -647,6 +666,17 @@ button.secondary:hover {
   border: 1px solid #d2d9e3;
   border-radius: 10px;
   background: #f8fafd;
+}
+
+.dependency-reference-line {
+  margin-bottom: 0.28rem;
+  color: #556171;
+  font-size: 0.78rem;
+}
+
+.dependency-reference-line code {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  color: #3f495c;
 }
 
 .included-header {
