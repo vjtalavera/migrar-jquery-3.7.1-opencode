@@ -131,6 +131,16 @@ function expandReplacement(template: string, match: RegExpMatchArray): string {
   });
 }
 
+function replaceMatchAtIndex(line: string, match: RegExpMatchArray, replacement: string): string {
+  if (typeof match.index !== 'number' || match.index < 0) {
+    return line.replace(match[0], replacement);
+  }
+
+  const matchStart = match.index;
+  const matchEnd = matchStart + match[0].length;
+  return `${line.slice(0, matchStart)}${replacement}${line.slice(matchEnd)}`;
+}
+
 function buildSuggestedLine(line: string, match: RegExpMatchArray, suggestedLine?: string, replacementText?: string): string | undefined {
   if (suggestedLine) {
     return suggestedLine;
@@ -140,7 +150,7 @@ function buildSuggestedLine(line: string, match: RegExpMatchArray, suggestedLine
     return undefined;
   }
 
-  return line.replace(match[0], expandReplacement(replacementText, match));
+  return replaceMatchAtIndex(line, match, expandReplacement(replacementText, match));
 }
 
 interface JQueryInstructionSegment {
