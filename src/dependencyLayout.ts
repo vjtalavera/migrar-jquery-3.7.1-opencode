@@ -237,7 +237,16 @@ function getOrderedFileReferences(content: string): OrderedReference[] {
     kind: 'script-src' as const,
   }));
 
-  return [...jspRefs, ...scriptRefs].sort((left, right) => {
+  const uniqueReferences = new Map<string, OrderedReference>();
+  for (const ref of [...jspRefs, ...scriptRefs]) {
+    const normalizedCode = ref.referenceCodeLine.replace(/\s+/g, ' ').trim();
+    const key = `${ref.kind}|${ref.line}|${normalizePath(ref.value).toLowerCase()}|${normalizedCode.toLowerCase()}`;
+    if (!uniqueReferences.has(key)) {
+      uniqueReferences.set(key, ref);
+    }
+  }
+
+  return Array.from(uniqueReferences.values()).sort((left, right) => {
     if (left.line !== right.line) {
       return left.line - right.line;
     }
